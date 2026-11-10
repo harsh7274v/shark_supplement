@@ -582,6 +582,7 @@ ordersRoutes.post("/orders", async (c: OrdersContext) => {
           gst: prices.gst,
           shipping: prices.shipping,
           total: prices.total,
+          estimated_delivery_date: delivery,
         },
         pricedItems.map((item) => ({
           name: item.name,
