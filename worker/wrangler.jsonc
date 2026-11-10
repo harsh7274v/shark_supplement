@@ -1,0 +1,24 @@
+{
+  "name": "kinetic-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-09-23",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "kinetic-db",
+      // Placeholder id: this worker only runs locally (tests + `wrangler dev --local`).
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "IMAGES",
+      "bucket_name": "kinetic-images"
+    }
+  ],
+  "vars": {
+    "JWT_SECRET": "dev-secret",
+    "FRONTEND_ORIGIN": "http://localhost:3000"
+  }
+}
