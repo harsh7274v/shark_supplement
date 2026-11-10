@@ -21,6 +21,7 @@ export default function Header({ onNavCategory }) {
   const { count, setCartOpen } = useCart();
   const [menuOpen, setMenuOpen] = useState(false);
   const [userMenu, setUserMenu] = useState(false);
+  const navigate = useNavigate();
 
   const go = (link) => {
     setMenuOpen(false);
