@@ -44,4 +44,14 @@ DONE — committed on master as `9b872fe` "feat(worker): idempotent catalog seed
 
 **Invariant going forward:** any future edit to a seed `.sql` file must be followed by running `node worker/scripts/sync-seed-vars.mjs` and committing both the `.sql` and `worker/wrangler.jsonc` together, so production never executes untested SQL.
 
+## Fix round 2
+
+**Problem (fix round 1 re-review verdict: NOT ADDRESSED):** `worker/scripts/sync-seed-vars.mjs` existed but was manual and unenforced. Production still executed the wrangler-var copies of the seed SQL, and nothing in the test suite caught divergence if a `.sql` file was edited without re-running the sync script.
+
+**Fix:** Added `worker/test/seed-vars-sync.test.ts`, a pure file-comparison test (no D1) that reads `worker/wrangler.jsonc` as text, `JSON.parse`s the `SEED_CATALOG` / `SEED_DEMO_ORDERS` var values, reads `worker/seed/001_catalog.sql` and `worker/seed/002_demo_orders.sql` as text, and asserts `SEED_CATALOG ===` catalog SQL and `SEED_DEMO_ORDERS ===` demo orders SQL exactly using `vitest`'s `expect(...).toBe(...)`. File contents are pulled in with `?raw` imports (resolved at transform time in Node) because the tests run inside the Workers runtime (workerd), where `node:fs` cannot read host files.
+
+**Result:** wrangler.jsonc's two seed vars are now pinned by test equality to their `.sql` sources. `node worker/scripts/sync-seed-vars.mjs` was re-run and confirmed `worker/wrangler.jsonc` already matches the `.sql` files (no diff), so no production SQL changed. Any future edit to a seed `.sql` file must be synced into `wrangler.jsonc` (via `node worker/scripts/sync-seed-vars.mjs`) or the sync test fails.
+
+**Test results:** `cd worker && npm test` → **293 passed / 18 files** (292 existing + 1 new sync test); `tsc --noEmit` → clean. Verified the test fails when a `.sql` file diverges from its wrangler var.
+
 Report: .superpowers/sdd/2026-11-10-cloudflare-migration-admin-dashboard/task-13-report.md
