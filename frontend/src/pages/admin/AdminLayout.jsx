@@ -1,4 +1,4 @@
-import { useLocation, useMatch, Link } from "react-router-dom";
+import { useLocation, Link } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { LogOut, ArrowRight } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
@@ -64,8 +64,7 @@ export default function AdminLayout() {
             className="space-y-1"
           >
             {NAV.map((item, i) => {
-              const match = useMatch(item.to);
-              const active = Boolean(match);
+              const active = location.pathname === item.to;
               return (
                 <Link
                   key={item.key}

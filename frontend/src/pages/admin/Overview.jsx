@@ -49,9 +49,9 @@ export default function Overview() {
   }, [fetchOverview]);
 
   const handleReset = async () => {
-    setConfirmReset(false);
     try {
       await API.post("/admin/demo-data/reset");
+      setConfirmReset(false);
       toast.success("Demo data reset");
       await fetchOverview();
     } catch (error) {
@@ -171,9 +171,10 @@ export default function Overview() {
         </motion.div>
 
         <AnimatePresence>
-          {orders === 0 ? (
+          {!loading && orders === 0 ? (
             <motion.div
               key="empty"
+              data-testid="overview-empty"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
