@@ -17,6 +17,13 @@ import { Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { Env } from "../env";
 import {
+  ACCESS_TOKEN_COOKIE,
+  AUTH_COOKIE_OPTIONS,
+  REFRESH_TOKEN_COOKIE,
+  SESSION_TOKEN_COOKIE,
+  randomHex,
+} from "../lib/auth-common";
+import {
   ACCESS_TOKEN_TTL,
   REFRESH_TOKEN_TTL,
   signAccessToken,
@@ -25,24 +32,16 @@ import {
 } from "../lib/jwt";
 import { hashPassword, verifyPassword } from "../lib/passwords";
 import { getOptionalUser, requireAuth } from "../middleware/auth";
+import { googleAuthRoutes } from "./auth.google";
 
 type AuthEnv = { Bindings: Env };
 type AuthContext = Context<AuthEnv>;
 
 export const authRoutes = new Hono<AuthEnv>();
 
-const ACCESS_TOKEN_COOKIE = "access_token";
-const REFRESH_TOKEN_COOKIE = "refresh_token";
-/** Written by the Google sign-in flow, dropped by the logout. */
-const SESSION_TOKEN_COOKIE = "session_token";
-
-/** The flags every auth cookie carries. */
-const COOKIE_OPTIONS = {
-  httpOnly: true,
-  secure: true,
-  sameSite: "None",
-  path: "/",
-} as const;
+// The Google sign-in lives in its own module; it answers on
+// `/api/auth/google/start` and `/api/auth/google/callback`.
+authRoutes.route("/google", googleAuthRoutes);
 
 /** Failed logins that lock a login identifier. */
 const LOCK_THRESHOLD = 4;
@@ -101,12 +100,6 @@ function normalizeEmail(value: unknown): string {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
 
-/** A hexadecimal random string, used for ids and reset tokens. */
-function randomHex(byteLength: number): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(byteLength));
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
 /**
  * Reads a timestamp column. Rows written by this module use ISO-8601, rows
  * written by SQL use `datetime('now')`; both are understood.
@@ -150,12 +143,12 @@ async function findUserById(db: D1Database, id: string): Promise<UserRow | null>
 
 async function setAccessCookie(c: AuthContext, userId: string, role: string): Promise<void> {
   const token = await signAccessToken({ sub: userId, role }, c.env.JWT_SECRET);
-  setCookie(c, ACCESS_TOKEN_COOKIE, token, { ...COOKIE_OPTIONS, maxAge: ACCESS_TOKEN_TTL });
+  setCookie(c, ACCESS_TOKEN_COOKIE, token, { ...AUTH_COOKIE_OPTIONS, maxAge: ACCESS_TOKEN_TTL });
 }
 
 async function setRefreshCookie(c: AuthContext, userId: string, role: string): Promise<void> {
   const token = await signRefreshToken({ sub: userId, role }, c.env.JWT_SECRET);
-  setCookie(c, REFRESH_TOKEN_COOKIE, token, { ...COOKIE_OPTIONS, maxAge: REFRESH_TOKEN_TTL });
+  setCookie(c, REFRESH_TOKEN_COOKIE, token, { ...AUTH_COOKIE_OPTIONS, maxAge: REFRESH_TOKEN_TTL });
 }
 
 /** Signs in the caller: a fresh access token and a fresh refresh token. */
@@ -300,9 +293,9 @@ authRoutes.post("/logout", async (c) => {
     await c.env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(user.user_id).run();
   }
 
-  deleteCookie(c, ACCESS_TOKEN_COOKIE, COOKIE_OPTIONS);
-  deleteCookie(c, REFRESH_TOKEN_COOKIE, COOKIE_OPTIONS);
-  deleteCookie(c, SESSION_TOKEN_COOKIE, COOKIE_OPTIONS);
+  deleteCookie(c, ACCESS_TOKEN_COOKIE, AUTH_COOKIE_OPTIONS);
+  deleteCookie(c, REFRESH_TOKEN_COOKIE, AUTH_COOKIE_OPTIONS);
+  deleteCookie(c, SESSION_TOKEN_COOKIE, AUTH_COOKIE_OPTIONS);
   return c.json({ ok: true });
 });
 
