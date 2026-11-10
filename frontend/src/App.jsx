@@ -8,6 +8,7 @@ import { CartProvider } from "./context/CartContext";
 import { useAuth } from "./context/AuthContext";
 import Home from "./pages/Home";
 import AuthCallback from "./pages/AuthCallback";
+import Overview from "./pages/admin/Overview";
 
 const AdminLayout = lazy(() => import("./pages/admin/AdminLayout"));
 
@@ -65,7 +66,7 @@ function AppRouter() {
       <Route path="/auth/callback" element={<AuthCallback />} />
       <Route path="/my-orders" element={<MyOrders />} />
       <Route
-        path="/admin/*"
+        path="/admin"
         element={
           user !== null && user !== false && user.role === "admin" ? (
             <Suspense fallback={null}>
@@ -75,7 +76,9 @@ function AppRouter() {
             <Navigate to="/" replace />
           )
         }
-      />
+      >
+        <Route index element={<Overview />} />
+      </Route>
     </Routes>
   );
 }
