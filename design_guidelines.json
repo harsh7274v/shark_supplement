@@ -1,0 +1,173 @@
+{
+  "brand_identity": {
+    "name": "KINETIC NUTRITION",
+    "tagline": "Pure Performance Engineering for Elite Athletes",
+    "emotional_archetype": "The Performance Pro (Elite Athleticism & Precision)",
+    "vibe": "Clean, light, ultra-premium, tactile-minimalist aesthetic with high-energy kinetic contrast."
+  },
+  "color_palette": {
+    "theme": "Light Theme Default with High-Contrast Dark & Electric Accent",
+    "css_variables": {
+      "--background": "0 0% 100%",
+      "--foreground": "222 47% 11%",
+      "--card": "0 0% 98%",
+      "--card-foreground": "222 47% 11%",
+      "--popover": "0 0% 100%",
+      "--popover-foreground": "222 47% 11%",
+      "--primary": "0 84.2% 60.2%",
+      "--primary-foreground": "0 0% 100%",
+      "--secondary": "210 40% 96.1%",
+      "--secondary-foreground": "222 47% 11%",
+      "--muted": "210 40% 96.1%",
+      "--muted-foreground": "215.4 16.3% 46.9%",
+      "--accent": "24 100% 50%",
+      "--accent-foreground": "0 0% 100%",
+      "--destructive": "0 84.2% 60.2%",
+      "--destructive-foreground": "0 0% 98%",
+      "--border": "214.3 31.8% 91.4%",
+      "--input": "214.3 31.8% 91.4%",
+      "--ring": "0 84.2% 60.2%",
+      "--radius": "1rem"
+    },
+    "color_hex_codes": {
+      "background": "#FFFFFF",
+      "surface_card": "#F8FAFC",
+      "surface_elevated": "#FFFFFF",
+      "text_main": "#0F172A",
+      "text_muted": "#64748B",
+      "primary_accent": "#FF3B30",
+      "secondary_accent": "#FF6B00",
+      "volt_glow": "#22C55E",
+      "dark_contrast_section": "#090D16",
+      "border_subtle": "#E2E8F0"
+    },
+    "contrast_rules": "All text elements must strictly pass WCAG AA (4.5:1 min). Hover states must explicitly set hover:text-white or hover:text-slate-900 to ensure high readability."
+  },
+  "typography": {
+    "headline_font": "Cabinet Grotesk / Outfit (Sans-Serif, Extra Bold 800/900)",
+    "body_font": "DM Sans / Manrope (Clean Geometric Sans)",
+    "font_family_imports": "<link href=\"https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Outfit:wght@600;700;800;900&display=swap\" rel=\"stylesheet\">",
+    "scale_hierarchy": {
+      "h1_hero": "text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight leading-none",
+      "h2_section": "text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight text-slate-900",
+      "h3_card_title": "text-lg sm:text-xl font-bold tracking-tight text-slate-900",
+      "body_text": "text-sm sm:text-base text-slate-600 leading-relaxed",
+      "label_overline": "text-xs uppercase font-extrabold tracking-[0.2em] text-red-500"
+    }
+  },
+  "spacing_and_layout": {
+    "philosophy": "Generous Spacing Scale with generous padding inside cards (p-6 to p-8) and container limits max-w-7xl mx-auto px-4 sm:px-6 lg:px-8.",
+    "bento_grid": "Grid with asymmetric spans for featured products and categories (grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 lg:gap-8).",
+    "header": "Sticky navbar with backdrop-blur-xl bg-white/85 z-50 border-b border-slate-100."
+  },
+  "motion_and_animations": {
+    "library": "framer-motion",
+    "smooth_scroll": "Lenis smooth scroll integration recommended",
+    "hero_reveal": "Staggered line-by-line masked text reveal with opacity and slide-up y: [30, 0], duration: 0.8s, ease: [0.16, 1, 0.3, 1]",
+    "category_circles": "Hover scale transform scale-105 with subtle glow ring and icon bounce transition",
+    "product_cards": "Card hover elevation with y: -6px, shadow transition, and image scale-105 inside rounded-2xl container",
+    "cart_drawer": "Right slide-in panel (x: '100%' to 0) with backdrop overlay fade-in (opacity 0 to 1)"
+  },
+  "sections_structure": [
+    {
+      "section": "Sticky Navigation Header",
+      "elements": [
+        "Brand Logo SVG (Dynamic Kinetic mark)",
+        "Desktop Nav Links (Shop All, Proteins, Pre-Workout, Fit Foods, Science, About)",
+        "Search bar trigger or input",
+        "Cart Icon Button with active badge count counter + click trigger opening right panel",
+        "Login / Signup Modal trigger button (Auth drawer/modal)"
+      ]
+    },
+    {
+      "section": "Hero Kinetic Section & Carousel",
+      "elements": [
+        "Kinetic hero headline with line-by-line entrance animation",
+        "Carousel photos of key supplements (Whey Isolate, Creatine Monohydrate, Pre-Workout)",
+        "CTA buttons ('Explore Products', 'Take Supplement Quiz')",
+        "Trust Badges (100% Lab Tested, Zero Sugar, Instantized Formula)"
+      ]
+    },
+    {
+      "section": "Editorial Marquee",
+      "elements": [
+        "Slow infinite marquee ribbon listing core values: 100% PURE ISOLATE • ZERO BANNED SUBSTANCES • CLINICALLY DOSED • FAST ABSORPTION • PREMIUM INGREDIENTS"
+      ]
+    },
+    {
+      "section": "Circular Categories Grid",
+      "elements": [
+        "7 Circular Tile Categories: 1. Proteins, 2. Gainers, 3. Pre/Post Workout, 4. Ayurveda, 5. Fit Foods, 6. Vitamin Supplements, 7. Fat Loss",
+        "Each circle container with high quality icon/illustration, hover scale effect, active selection toggle state"
+      ]
+    },
+    {
+      "section": "New Arrivals / Recently Added",
+      "elements": [
+        "Grid of 4 newly released supplements",
+        "Product Card design with badge ('NEW', 'HOT'), price tag, rating stars, Buy Now button, Add to Cart button"
+      ]
+    },
+    {
+      "section": "Products by Category / Best Sellers",
+      "elements": [
+        "Category tabs & Sort Dropdown (Sort by: Most Ordered, Price: Low to High, Price: High to Low, Top Rated)",
+        "Grid of catalog products with full filter and search capabilities"
+      ]
+    },
+    {
+      "section": "Right-Side Sliding Cart Panel & Checkout UI Flow",
+      "elements": [
+        "Slide-over panel on the right side",
+        "List of items added to cart with quantity increment/decrement, variant selector (Flavor/Weight), delete item button",
+        "Promo/Coupon code input box with apply button & live discount calculation",
+        "Pricing summary: Subtotal, Estimated Tax, Free Express Shipping indicator, Grand Total",
+        "Checkout Button triggering full multi-step Checkout Modal (Shipping Details -> Payment Method Mock -> Order Confirmation screen)"
+      ]
+    },
+    {
+      "section": "Auth Modal (Login / Signup)",
+      "elements": [
+        "Tabbed interface: Login vs Sign Up",
+        "Google Sign-In button with official branding icon",
+        "Email & Password fields with state validation",
+        "Remember me toggle & Forgot Password trigger"
+      ]
+    },
+    {
+      "section": "Footer",
+      "elements": [
+        "Brand overview & newsletter subscription box",
+        "Category navigation links, Customer Support, Quality Guarantee",
+        "Payment badge icons & social media handles"
+      ]
+    }
+  ],
+  "image_urls": {
+    "hero_carousel": [
+      "https://images.unsplash.com/photo-1693996045899-7cf0ac0229c7?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1NzZ8MHwxfHNlYXJjaHwyfHx3aGV5JTIwcHJvdGVpbiUyMHBvd2RlciUyMGNvbnRhaW5lciUyMHN1cHBsZW1lbnR8ZW58MHx8fHwxNzk0MjkzMzc4fDA&ixlib=rb-4.1.0&q=85",
+      "https://images.unsplash.com/photo-1768161680813-615df885ff82?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNDR8MHwxfHNlYXJjaHwyfHxmaXRuZXNzJTIwYXRobGV0aWMlMjB3b3Jrb3V0JTIwZ3ltJTIwc3VwcGxlbWVudCUyMGJvdHRsZXxlbnwwfHx8fDE3OTQyOTMzNzh8MA&ixlib=rb-4.1.0&q=85",
+      "https://images.unsplash.com/photo-1763757933292-d8290692edde?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNDR8MHwxfHNlYXJjaHwzfHxmaXRuZXNzJTIwYXRobGV0aWMlMjB3b3Jrb3V0JTIwZ3ltJTIwc3VwcGxlbWVudCUyMGJvdHRsZXxlbnwwfHx8fDE3OTQyOTMzNzh8MA&ixlib=rb-4.1.0&q=85"
+    ],
+    "products": {
+      "proteins": "https://images.unsplash.com/photo-1693996045899-7cf0ac0229c7?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1NzZ8MHwxfHNlYXJjaHwyfHx3aGV5JTIwcHJvdGVpbiUyMHBvd2RlciUyMGNvbnRhaW5lciUyMHN1cHBsZW1lbnR8ZW58MHx8fHwxNzk0MjkzMzc4fDA&ixlib=rb-4.1.0&q=85",
+      "gainers": "https://images.unsplash.com/photo-1704650311190-7eeb9c4f6e11?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1NzZ8MHwxfHNlYXJjaHwzfHx3aGV5JTIwcHJvdGVpbiUyMHBvd2RlciUyMGNvbnRhaW5lciUyMHN1cHBsZW1lbnR8ZW58MHx8fHwxNzk0MjkzMzc4fDA&ixlib=rb-4.1.0&q=85",
+      "pre_post": "https://images.unsplash.com/photo-1768161680813-615df885ff82?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNDR8MHwxfHNlYXJjaHwyfHxmaXRuZXNzJTIwYXRobGV0aWMlMjB3b3Jrb3V0JTIwZ3ltJTIwc3VwcGxlbWVudCUyMGJvdHRsZXxlbnwwfHx8fDE3OTQyOTMzNzh8MA&ixlib=rb-4.1.0&q=85",
+      "ayurveda": "https://images.unsplash.com/photo-1763747958224-7726941b0b15?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2MzR8MHwxfHNlYXJjaHwzfHxoZWFsdGh5JTIwZml0JTIwZm9vZCUyMHZpdGFtaW5zJTIwbnV0cml0aW9uJTIwY29udGFpbmVyfGVufDB8fHx8MTc5NDI5MzM3OHww&ixlib=rb-4.1.0&q=85",
+      "fit_foods": "https://images.unsplash.com/photo-1779939855736-ff7b1dffcb42?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2MzR8MHwxfHNlYXJjaHwyfHxoZWFsdGh5JTIwZml0JTIwZm9vZCUyMHZpdGFtaW5zJTIwbnV0cml0aW9uJTIwY29udGFpbmVyfGVufDB8fHx8MTc5NDI5MzM3OHww&ixlib=rb-4.1.0&q=85",
+      "vitamins": "https://images.unsplash.com/photo-1763747958224-7726941b0b15?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2MzR8MHwxfHNlYXJjaHwzfHxoZWFsdGh5JTIwZml0JTIwZm9vZCUyMHZpdGFtaW5zJTIwbnV0cml0aW9uJTIwY29udGFpbmVyfGVufDB8fHx8MTc5NDI5MzM3OHww&ixlib=rb-4.1.0&q=85",
+      "fat_loss": "https://images.unsplash.com/photo-1763757933292-d8290692edde?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNDR8MHwxfHNlYXJjaHwzfHxmaXRuZXNzJTIwYXRobGV0aWMlMjB3b3Jrb3V0JTIwZ3ltJTIwc3VwcGxlbWVudCUyMGJvdHRsZXxlbnwwfHx8fDE3OTQyOTMzNzh8MA&ixlib=rb-4.1.0&q=85"
+    }
+  },
+  "testing_requirements": {
+    "data_testid_convention": "All interactive elements must include descriptive data-testid attributes (e.g., data-testid='cart-toggle-button', data-testid='add-to-cart-btn-1', data-testid='checkout-button', data-testid='category-circle-proteins', data-testid='sort-select-dropdown', data-testid='auth-modal-google-btn')."
+  },
+  "instructions_to_main_agent": [
+    "Ensure all components are implemented using React + Tailwind CSS + Framer Motion in JS files.",
+    "Do not use generic Inter font for main headlines. Import Outfit / Manrope from Google Fonts in index.html.",
+    "Strictly follow the homepage structure sequence: Header -> Kinetic Hero -> Marquee -> 7 Circular Categories -> New Arrivals -> Best Sellers with Sort -> Footer.",
+    "Provide responsive drawer sliding cart on the right side with quantity changes, live coupon code calculation, price breakdown, and smooth checkout flow modal.",
+    "Ensure every interactive button/input contains explicit data-testid attribute."
+  ]
+}
+
