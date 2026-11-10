@@ -23,6 +23,7 @@ import {
   SESSION_TOKEN_COOKIE,
   randomHex,
 } from "../lib/auth-common";
+import { readJsonBody } from "../lib/http";
 import {
   ACCESS_TOKEN_TTL,
   REFRESH_TOKEN_TTL,
@@ -71,19 +72,6 @@ function publicUser(row: UserRow) {
     role: row.role,
     auth_provider: row.auth_provider ?? "password",
   };
-}
-
-/** Reads the request body, answering `null` when it is not a JSON object. */
-async function readBody(c: AuthContext): Promise<Record<string, unknown> | null> {
-  try {
-    const body: unknown = await c.req.json();
-    if (typeof body !== "object" || body === null || Array.isArray(body)) {
-      return null;
-    }
-    return body as Record<string, unknown>;
-  } catch {
-    return null;
-  }
 }
 
 /** Emails are stored lower cased, so they are looked up that way too. */
@@ -140,7 +128,7 @@ async function signIn(c: AuthContext, userId: string, role: string): Promise<voi
 }
 
 authRoutes.post("/register", async (c) => {
-  const body = await readBody(c);
+  const body = await readJsonBody(c);
   if (!body) {
     return c.json({ detail: "Invalid request body" }, 400);
   }
@@ -200,7 +188,7 @@ authRoutes.post("/register", async (c) => {
 });
 
 authRoutes.post("/login", async (c) => {
-  const body = await readBody(c);
+  const body = await readJsonBody(c);
   if (!body) {
     return c.json({ detail: "Invalid request body" }, 400);
   }
@@ -317,7 +305,7 @@ authRoutes.post("/refresh", async (c) => {
 });
 
 authRoutes.post("/forgot-password", async (c) => {
-  const body = await readBody(c);
+  const body = await readJsonBody(c);
   if (!body) {
     return c.json({ detail: "Invalid request body" }, 400);
   }

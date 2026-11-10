@@ -1,0 +1,603 @@
+/**
+ * The commerce routes: the coupon validation, the order creation with the
+ * mock payment and the buyer's own orders.
+ *
+ * Mounted at `/api` by `src/index.ts`, so the routes answer on
+ * `/api/coupons/validate`, `/api/orders` and `/api/orders/:id/status-history`.
+ *
+ * The prices of an order are always recomputed from the database: a price
+ * sent by the client is never trusted. Every amount is an integer number of
+ * paise. Guest checkout stays: the user id of an order is empty when the
+ * buyer is not signed in.
+ */
+
+import type { Context } from "hono";
+import { Hono } from "hono";
+import type { Env } from "../env";
+import { sendMail } from "../lib/email";
+import { orderPlacedEmail } from "../lib/email-templates";
+import { readJsonBody } from "../lib/http";
+import type { CouponRow, PricedItem } from "../lib/pricing";
+import { couponApplies, couponDiscount, priceOrder } from "../lib/pricing";
+import { getOptionalUser, requireAuth } from "../middleware/auth";
+
+type OrdersEnv = { Bindings: Env };
+type OrdersContext = Context<OrdersEnv>;
+
+export const ordersRoutes = new Hono<OrdersEnv>();
+
+/** The smallest quantity a line of an order can have. */
+const MIN_QTY = 1;
+/** The biggest quantity a line of an order can have. */
+const MAX_QTY = 20;
+
+/** The number of the first order: `KN-` and 1000 plus the orders there are. */
+const FIRST_ORDER_NUMBER = 1001;
+
+/** The days an order takes; the estimate the buyer is given. */
+const DELIVERY_DAYS = 5;
+
+const INVALID_BODY = "Invalid request body";
+const EMPTY_CART = "Cart is empty";
+const INVALID_QUANTITY = `Quantity must be between ${MIN_QTY} and ${MAX_QTY}`;
+const INVALID_PAYMENT_METHOD = "Invalid payment method";
+const SHIPPING_REQUIRED = "Shipping details are required";
+const PRODUCT_REQUIRED = "Product id is required";
+const INSUFFICIENT_STOCK = "Insufficient stock";
+const ORDER_NOT_FOUND = "Order not found";
+const NOT_YOUR_ORDER = "Not your order";
+const NOT_AUTHENTICATED = "Not authenticated";
+
+/** The payment methods the mock payment knows. */
+const PAYMENT_METHODS = new Set(["cod", "upi", "card"]);
+
+/** A product of the cart, as the database has it. */
+interface ProductRow {
+  id: string;
+  name: string;
+  sale_price: number;
+  stock: number;
+  is_active: number;
+}
+
+/** A line of the cart, as the client sends it. */
+interface CartItem {
+  product_id: string;
+  qty: number;
+  flavor: string | null;
+  weight: string | null;
+}
+
+/** The shipping details of an order. */
+interface ShippingDetails {
+  full_name: string;
+  phone: string;
+  email: string;
+  address: string;
+  city: string;
+  pincode: string;
+}
+
+/** An order row, as the database has it. */
+interface OrderRow {
+  id: string;
+  order_number: string;
+  user_id: string | null;
+  name: string;
+  email: string;
+  phone: string | null;
+  address: string | null;
+  subtotal: number;
+  discount: number;
+  coupon_code: string | null;
+  gst: number;
+  shipping: number;
+  total: number;
+  status: string;
+  estimated_delivery_date: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A line of an order, as the database has it. */
+interface OrderItemRow {
+  id: string;
+  order_id: string;
+  product_id: string | null;
+  name: string;
+  unit_price: number;
+  qty: number;
+  flavor: string | null;
+  weight: string | null;
+}
+
+/** A status history row, as the database has it. */
+interface HistoryRow {
+  id: string;
+  order_id: string;
+  status: string;
+  note: string | null;
+  created_at: string;
+}
+
+/** Reads a string of a body; anything else reads as an empty string. */
+function readString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/** A fresh id for an order, a line, a payment or a history row. */
+function newId(prefix: string): string {
+  return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+}
+
+/** The date an order is expected to be delivered, a few days out. */
+function estimatedDeliveryDate(): string {
+  return new Date(Date.now() + DELIVERY_DAYS * 86_400_000).toISOString().slice(0, 10);
+}
+
+/** The shipping details of a body, or `null` when one of them is missing. */
+function readShipping(value: unknown): ShippingDetails | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  const raw = value as Record<string, unknown>;
+  const details: ShippingDetails = {
+    full_name: readString(raw.full_name),
+    phone: readString(raw.phone),
+    email: readString(raw.email),
+    address: readString(raw.address),
+    city: readString(raw.city),
+    pincode: readString(raw.pincode),
+  };
+
+  const missing = Object.values(details).some((field) => field === "");
+  return missing ? null : details;
+}
+
+/** The coupon of a code; `null` when there is no coupon with that code. */
+async function findCoupon(db: D1Database, code: string): Promise<CouponRow | null> {
+  return db
+    .prepare(
+      "SELECT code, discount_type, discount_value, min_order, active FROM coupons WHERE code = ?",
+    )
+    .bind(code)
+    .first<CouponRow>();
+}
+
+/** The address of an order, read from the json blob of its column. */
+function parseAddress(value: string | null): Record<string, string> | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed as Record<string, string>;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The orders of a buyer, oldest first, with their lines and their history.
+ *
+ * The lines and the history come in two queries of their own, so the list
+ * never walks the orders one by one.
+ */
+async function listOrders(db: D1Database, userId: string) {
+  const { results: orderRows } = await db
+    .prepare(
+      `SELECT id, order_number, user_id, name, email, phone, address, subtotal,
+              discount, coupon_code, gst, shipping, total, status,
+              estimated_delivery_date, created_at, updated_at
+       FROM orders WHERE user_id = ?
+       ORDER BY created_at ASC, id ASC`,
+    )
+    .bind(userId)
+    .all<OrderRow>();
+
+  if (orderRows.length === 0) {
+    return [];
+  }
+
+  const ids = orderRows.map((order) => order.id);
+  const placeholders = ids.map(() => "?").join(", ");
+
+  const [{ results: itemRows }, { results: historyRows }] = await Promise.all([
+    db
+      .prepare(
+        `SELECT id, order_id, product_id, name, unit_price, qty, flavor, weight
+         FROM order_items WHERE order_id IN (${placeholders})
+         ORDER BY id ASC`,
+      )
+      .bind(...ids)
+      .all<OrderItemRow>(),
+    db
+      .prepare(
+        `SELECT id, order_id, status, note, created_at
+         FROM order_status_history WHERE order_id IN (${placeholders})
+         ORDER BY created_at ASC, id ASC`,
+      )
+      .bind(...ids)
+      .all<HistoryRow>(),
+  ]);
+
+  const itemsByOrder = new Map<string, OrderItemRow[]>();
+  for (const item of itemRows) {
+    itemsByOrder.set(item.order_id, [...(itemsByOrder.get(item.order_id) ?? []), item]);
+  }
+
+  const historyByOrder = new Map<string, HistoryRow[]>();
+  for (const entry of historyRows) {
+    historyByOrder.set(entry.order_id, [...(historyByOrder.get(entry.order_id) ?? []), entry]);
+  }
+
+  return orderRows.map((order) => ({
+    id: order.id,
+    order_number: order.order_number,
+    user_id: order.user_id,
+    name: order.name,
+    email: order.email,
+    phone: order.phone,
+    address: parseAddress(order.address),
+    subtotal: order.subtotal,
+    discount: order.discount,
+    coupon_code: order.coupon_code,
+    gst: order.gst,
+    shipping: order.shipping,
+    total: order.total,
+    status: order.status,
+    estimated_delivery_date: order.estimated_delivery_date,
+    created_at: order.created_at,
+    updated_at: order.updated_at,
+    items: (itemsByOrder.get(order.id) ?? []).map((item) => ({
+      id: item.id,
+      product_id: item.product_id,
+      name: item.name,
+      unit_price: item.unit_price,
+      qty: item.qty,
+      flavor: item.flavor,
+      weight: item.weight,
+    })),
+    status_history: (historyByOrder.get(order.id) ?? []).map((entry) => ({
+      id: entry.id,
+      status: entry.status,
+      note: entry.note,
+      created_at: entry.created_at,
+    })),
+  }));
+}
+
+/**
+ * Undoes an order whose stock was taken by another order in the meantime:
+ * the order goes, and the stock of the products that were taken comes back.
+ */
+async function undoOrder(
+  db: D1Database,
+  orderId: string,
+  stockUpdates: [string, number][],
+  failed: string,
+): Promise<void> {
+  const restore = stockUpdates
+    .filter(([productId]) => productId !== failed)
+    .map(([productId, qty]) =>
+      db
+        .prepare(
+          "UPDATE products SET stock = stock + ?, orders_count = orders_count - ? WHERE id = ?",
+        )
+        .bind(qty, qty, productId),
+    );
+
+  await db.batch([
+    ...restore,
+    db.prepare("DELETE FROM orders WHERE id = ?").bind(orderId),
+  ]);
+}
+
+ordersRoutes.post("/coupons/validate", async (c: OrdersContext) => {
+  const body = await readJsonBody(c);
+  if (!body) {
+    return c.json({ detail: INVALID_BODY }, 400);
+  }
+
+  const code = readString(body.code).toUpperCase();
+  const subtotal =
+    typeof body.subtotal === "number" && Number.isFinite(body.subtotal)
+      ? Math.max(0, Math.round(body.subtotal))
+      : null;
+
+  if (!code || subtotal === null) {
+    return c.json({ detail: INVALID_BODY }, 400);
+  }
+
+  const coupon = await findCoupon(c.env.DB, code);
+  if (!coupon || !couponApplies(coupon, subtotal)) {
+    return c.json({ valid: false });
+  }
+
+  return c.json({ valid: true, code: coupon.code, discount: couponDiscount(coupon, subtotal) });
+});
+
+ordersRoutes.post("/orders", async (c: OrdersContext) => {
+  const body = await readJsonBody(c);
+  if (!body) {
+    return c.json({ detail: INVALID_BODY }, 400);
+  }
+
+  const rawItems = body.items;
+  if (!Array.isArray(rawItems) || rawItems.length === 0) {
+    return c.json({ detail: EMPTY_CART }, 400);
+  }
+
+  const items: CartItem[] = [];
+  for (const raw of rawItems) {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+      return c.json({ detail: INVALID_BODY }, 400);
+    }
+
+    const line = raw as Record<string, unknown>;
+    const productId = readString(line.product_id);
+    if (!productId) {
+      return c.json({ detail: PRODUCT_REQUIRED }, 400);
+    }
+
+    const qty = line.qty;
+    if (typeof qty !== "number" || !Number.isInteger(qty) || qty < MIN_QTY || qty > MAX_QTY) {
+      return c.json({ detail: INVALID_QUANTITY }, 400);
+    }
+
+    items.push({
+      product_id: productId,
+      qty,
+      flavor: readString(line.flavor) || null,
+      weight: readString(line.weight) || null,
+    });
+  }
+
+  const shipping = readShipping(body.shipping);
+  if (!shipping) {
+    return c.json({ detail: SHIPPING_REQUIRED }, 400);
+  }
+
+  const paymentMethod =
+    body.payment_method === undefined ? "cod" : readString(body.payment_method).toLowerCase();
+  if (!PAYMENT_METHODS.has(paymentMethod)) {
+    return c.json({ detail: INVALID_PAYMENT_METHOD }, 400);
+  }
+
+  // The products of the cart, with the prices of the database.
+  const wanted = [...new Set(items.map((item) => item.product_id))];
+  const placeholders = wanted.map(() => "?").join(", ");
+  const { results: productRows } = await c.env.DB
+    .prepare(
+      `SELECT id, name, sale_price, stock, is_active
+       FROM products WHERE id IN (${placeholders})`,
+    )
+    .bind(...wanted)
+    .all<ProductRow>();
+  const products = new Map(productRows.map((row) => [row.id, row]));
+
+  // Every line of the cart, with the price of the database.
+  const lines: { item: CartItem; priced: PricedItem }[] = [];
+  const wantedQty = new Map<string, number>();
+  for (const item of items) {
+    const product = products.get(item.product_id);
+    if (!product || product.is_active !== 1) {
+      return c.json({ detail: `Product ${item.product_id} not found` }, 400);
+    }
+
+    lines.push({
+      item,
+      priced: {
+        product_id: item.product_id,
+        name: product.name,
+        unit_price: product.sale_price,
+        qty: item.qty,
+        flavor: item.flavor,
+        weight: item.weight,
+      },
+    });
+    wantedQty.set(item.product_id, (wantedQty.get(item.product_id) ?? 0) + item.qty);
+  }
+
+  // The stock has to cover the whole cart, even when a product is in it twice.
+  for (const [productId, qty] of wantedQty) {
+    const product = products.get(productId);
+    if (!product || product.stock < qty) {
+      return c.json({ detail: INSUFFICIENT_STOCK }, 400);
+    }
+  }
+
+  const pricedItems = lines.map((line) => line.priced);
+
+  // The coupon of the cart. A coupon that cannot be used is ignored, like
+  // the old API did.
+  const couponCode = readString(body.coupon_code).toUpperCase();
+  const coupon = couponCode ? await findCoupon(c.env.DB, couponCode) : null;
+  const prices = priceOrder(pricedItems, coupon);
+  const appliedCoupon = couponApplies(coupon, prices.subtotal) ? coupon : null;
+
+  const user = await getOptionalUser(c);
+  const orderId = newId("ord");
+  const address = JSON.stringify(shipping);
+  const delivery = estimatedDeliveryDate();
+  const now = new Date().toISOString();
+
+  const stockUpdates = [...wantedQty.entries()];
+
+  // The order and everything that belongs to it, in one transaction.
+  const statements = [
+    // The stock of every product of the cart goes down and its order count
+    // goes up. The `stock >= ?` keeps the stock from going negative.
+    ...stockUpdates.map(([productId, qty]) =>
+      c.env.DB
+        .prepare(
+          `UPDATE products SET stock = stock - ?, orders_count = orders_count + ?
+           WHERE id = ? AND stock >= ?`,
+        )
+        .bind(qty, qty, productId, qty),
+    ),
+    // The number of the order is counted inside the transaction, so two
+    // orders that arrive at the same time cannot share a number.
+    c.env.DB
+      .prepare(
+        `INSERT INTO orders (id, order_number, user_id, name, email, phone, address,
+           subtotal, discount, coupon_code, gst, shipping, total, status,
+           estimated_delivery_date, created_at, updated_at)
+         VALUES (?, 'KN-' || (CAST(? AS INTEGER) + (SELECT COUNT(*) FROM orders)), ?, ?, ?, ?, ?,
+           ?, ?, ?, ?, ?, ?, 'placed', ?, ?, ?)`,
+      )
+      .bind(
+        orderId,
+        FIRST_ORDER_NUMBER,
+        user?.user_id ?? null,
+        shipping.full_name,
+        shipping.email,
+        shipping.phone,
+        address,
+        prices.subtotal,
+        prices.discount,
+        appliedCoupon?.code ?? null,
+        prices.gst,
+        prices.shipping,
+        prices.total,
+        delivery,
+        now,
+        now,
+      ),
+    ...lines.map(({ item, priced }) =>
+      c.env.DB
+        .prepare(
+          `INSERT INTO order_items (id, order_id, product_id, name, unit_price, qty, flavor, weight)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          newId("item"),
+          orderId,
+          item.product_id,
+          priced.name,
+          priced.unit_price,
+          item.qty,
+          item.flavor,
+          item.weight,
+        ),
+    ),
+    // The mock payment: a card and a upi payment are paid right away, a cash
+    // on delivery one is paid when the order arrives.
+    c.env.DB
+      .prepare("INSERT INTO payments (id, order_id, method, amount, status) VALUES (?, ?, ?, ?, ?)")
+      .bind(
+        newId("pay"),
+        orderId,
+        paymentMethod,
+        prices.total,
+        paymentMethod === "cod" ? "on_delivery" : "paid",
+      ),
+    c.env.DB
+      .prepare("INSERT INTO order_status_history (id, order_id, status, note) VALUES (?, ?, 'placed', ?)")
+      .bind(newId("hist"), orderId, "Order placed"),
+  ];
+
+  const results = await c.env.DB.batch(statements);
+
+  // The stock of a product can be taken by another order between the check
+  // and the write. When that happens the order is undone.
+  const failed = stockUpdates.find((_, index) => (results[index]?.meta?.changes ?? 0) !== 1);
+  if (failed) {
+    await undoOrder(c.env.DB, orderId, stockUpdates, failed[0]);
+    return c.json({ detail: INSUFFICIENT_STOCK }, 400);
+  }
+
+  const order = await c.env.DB.prepare("SELECT order_number FROM orders WHERE id = ?")
+    .bind(orderId)
+    .first<{ order_number: string }>();
+  const orderNumber = order?.order_number ?? "";
+
+  try {
+    await sendMail(
+      c.env,
+      orderPlacedEmail(
+        {
+          order_number: orderNumber,
+          name: shipping.full_name,
+          email: shipping.email,
+          subtotal: prices.subtotal,
+          discount: prices.discount,
+          gst: prices.gst,
+          shipping: prices.shipping,
+          total: prices.total,
+        },
+        pricedItems.map((item) => ({
+          name: item.name,
+          qty: item.qty,
+          unit_price: item.unit_price,
+        })),
+      ),
+      { orderId, template: "placed" },
+    );
+  } catch {
+    // A mail that cannot be sent must not fail the order.
+  }
+
+  return c.json({ order_id: orderId, order_number: orderNumber, total: prices.total }, 201);
+});
+
+ordersRoutes.get("/orders", requireAuth, async (c: OrdersContext) => {
+  const user = await getOptionalUser(c);
+  if (!user) {
+    return c.json({ detail: NOT_AUTHENTICATED }, 401);
+  }
+
+  return c.json(await listOrders(c.env.DB, user.user_id));
+});
+
+/** The same list as `/api/orders`; the storefront asks for `/api/orders/me`. */
+ordersRoutes.get("/orders/me", requireAuth, async (c: OrdersContext) => {
+  const user = await getOptionalUser(c);
+  if (!user) {
+    return c.json({ detail: NOT_AUTHENTICATED }, 401);
+  }
+
+  return c.json(await listOrders(c.env.DB, user.user_id));
+});
+
+ordersRoutes.get("/orders/:id/status-history", requireAuth, async (c: OrdersContext) => {
+  const user = await getOptionalUser(c);
+  if (!user) {
+    return c.json({ detail: NOT_AUTHENTICATED }, 401);
+  }
+
+  const order = await c.env.DB.prepare("SELECT id, user_id FROM orders WHERE id = ?")
+    .bind(c.req.param("id"))
+    .first<{ id: string; user_id: string | null }>();
+
+  if (!order) {
+    return c.json({ detail: ORDER_NOT_FOUND }, 404);
+  }
+
+  if (user.role !== "admin" && order.user_id !== user.user_id) {
+    return c.json({ detail: NOT_YOUR_ORDER }, 403);
+  }
+
+  const { results } = await c.env.DB
+    .prepare(
+      `SELECT id, status, note, created_at
+       FROM order_status_history WHERE order_id = ?
+       ORDER BY created_at ASC, id ASC`,
+    )
+    .bind(order.id)
+    .all<HistoryRow>();
+
+  return c.json(
+    results.map((entry) => ({
+      id: entry.id,
+      status: entry.status,
+      note: entry.note,
+      created_at: entry.created_at,
+    })),
+  );
+});
