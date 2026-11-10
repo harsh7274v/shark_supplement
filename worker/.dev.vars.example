@@ -1,0 +1,49 @@
+# Kinetic Nutrition Worker environment variables.
+#
+# Copy this file to `worker/.dev.vars` and fill in real values for local
+# development (`wrangler dev`). Values marked (secret) should be set with
+# `wrangler secret put <NAME>` rather than checked into version control.
+
+# --- D1 database binding ---
+# Configured in `wrangler.jsonc` as `d1_databases[].binding = "DB"`,
+# database `kinetic-db`. Create the remote database with:
+#   wrangler d1 create kinetic-db
+# (the database_id in wrangler.jsonc is updated automatically on deploy).
+DB=kinetic-db
+
+# --- R2 bucket binding ---
+# Configured in `wrangler.jsonc` as `r2_buckets[].binding = "IMAGES"`,
+# bucket `kinetic-images`. Create the remote bucket with:
+#   wrangler r2 create kinetic-images
+IMAGES=kinetic-images
+
+# --- Application secrets ---
+# Signs JWT access / refresh tokens. Generate one with:
+#   openssl rand -base64 32
+JWT_SECRET= (secret)
+
+# Origin of the Pages frontend, used for CORS (cookies use SameSite=None).
+# Local dev: http://localhost:3000. Production: your Pages domain.
+FRONTEND_ORIGIN=http://localhost:3000
+
+# --- Google OAuth ---
+# The "Continue with Google" button in the frontend stays hidden until
+# `REACT_APP_GOOGLE_ENABLED=true` is set in the frontend build.
+GOOGLE_CLIENT_ID= (secret)
+GOOGLE_CLIENT_SECRET= (secret)
+
+# --- SMTP mail (optional) ---
+# Mails are skipped and written to the `email_log` table when the host is
+# unset, so no store flow breaks without a mail server.
+SMTP_HOST= (secret)
+SMTP_PORT=587
+SMTP_USER= (secret)
+SMTP_PASS= (secret)
+SMTP_FROM= (secret)
+
+# --- Optional seed SQL ---
+# `SEED_CATALOG` and `SEED_DEMO_ORDERS` are wired into `wrangler.jsonc` as
+# `vars` and read by the tests / the demo-data seed endpoint. Optional; the
+# worker works without them (the seed endpoint answers 500).
+# SEED_CATALOG=
+# SEED_DEMO_ORDERS=

@@ -1,0 +1,11 @@
+# Cloudflare Pages project — Kinetic Nutrition frontend.
+#
+# /api/* requests are proxied to the `kinetic-api` Worker via a service
+# binding, so the frontend and API run on the same Pages domain.
+
+compatibility_date = "2024-09-23"
+pages_build_output_dir = "build"
+
+[[services]]
+  binding = "API"
+  service = "kinetic-api"
