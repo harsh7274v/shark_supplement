@@ -29,6 +29,7 @@ export default function Products({ tab = "list" }) {
 
   const fetchProducts = useCallback(async () => {
     setLoading(true);
+    setRefreshing(true);
     try {
       const { data } = await API.get("/admin/products");
       let list = Array.isArray(data) ? data : [];
@@ -40,6 +41,7 @@ export default function Products({ tab = "list" }) {
       toast.error(formatApiError(error) || "Failed to load products");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [isArrivals]);
 

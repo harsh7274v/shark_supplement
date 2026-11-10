@@ -23,6 +23,7 @@ export default function Categories() {
 
   const fetchCategories = useCallback(async () => {
     setLoading(true);
+    setRefreshing(true);
     try {
       const { data } = await API.get("/admin/categories");
       setItems(Array.isArray(data) ? data : []);
@@ -30,6 +31,7 @@ export default function Categories() {
       toast.error(formatApiError(error) || "Failed to load categories");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
@@ -41,6 +43,9 @@ export default function Categories() {
     const next = {};
     if (!form.name.trim()) {
       next.name = "Name is required";
+    }
+    if (form.sort_order !== "" && !/^\d+$/.test(form.sort_order)) {
+      next.sort_order = "Sort order must be a whole number";
     }
     setErrors(next);
     return Object.keys(next).length > 0;
@@ -230,7 +235,7 @@ export default function Categories() {
       </div>
 
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onCloseSaveForm}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={closeForm}>
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}

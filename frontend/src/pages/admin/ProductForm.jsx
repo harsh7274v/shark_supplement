@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { X, Image as ImageIcon } from "lucide-react";
-import { API, inr, toPaise, formatApiError } from "../../lib/api";
+import { API, toPaise, formatApiError } from "../../lib/api";
 import { toast } from "sonner";
 
 /** Badge values the admin writes: canonical uppercase per the storefront comparison. */
@@ -118,10 +118,10 @@ export default function ProductForm({ product: initialProduct, onSave, onClose }
     if (!Number.isFinite(mrp) || mrp <= 0) {
       next.mrp = "MRP must be greater than 0";
     }
-    if (!Number.isFinite(sale) || sale <= 0) {
+    const saleValid = Number.isFinite(sale) && sale > 0;
+    if (!saleValid) {
       next.sale = "Sale price must be greater than 0";
-    }
-    if (next.sale == null && Number.isFinite(mrp) && Number.isFinite(sale) && sale > mrp) {
+    } else if (Number.isFinite(mrp) && sale > mrp) {
       next.sale = "Sale price must be ≤ MRP";
     }
     const stock = Number(form.stock);
