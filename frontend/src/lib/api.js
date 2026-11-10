@@ -1,7 +1,12 @@
 import axios from "axios";
 
+const backendUrl =
+  (typeof process !== "undefined" && process.env?.REACT_APP_BACKEND_URL) ||
+  (typeof import.meta !== "undefined" && import.meta.env?.VITE_BACKEND_URL) ||
+  "http://localhost:8000";
+
 export const API = axios.create({
-  baseURL: (process.env.REACT_APP_BACKEND_URL || "http://localhost:8000") + "/api",
+  baseURL: `${backendUrl}/api`,
   withCredentials: true,
 });
 
@@ -27,4 +32,3 @@ export const scrollToSection = (id) => {
   if (window.__lenis) window.__lenis.scrollTo(el, { offset: -76 });
   else el.scrollIntoView({ behavior: "smooth", block: "start" });
 };
-
