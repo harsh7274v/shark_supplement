@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { Env } from "./env";
+import { adminRoutes } from "./routes/admin";
 import { authRoutes } from "./routes/auth";
 import { catalogRoutes } from "./routes/catalog";
 import { ordersRoutes } from "./routes/orders";
@@ -22,5 +23,6 @@ app.route("/api/auth", authRoutes);
 app.route("/api", catalogRoutes);
 app.route("/api", ordersRoutes);
 app.route("/api", uploadRoutes);
+app.route("/api/admin", adminRoutes);
 
 export default app;
