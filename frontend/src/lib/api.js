@@ -24,6 +24,9 @@ export function formatApiError(e) {
 
 export const inr = (n) => "₹" + Math.round(n).toLocaleString("en-IN");
 
+/** Rupees → integer paise (mirrors the server-side `toPaise` money util). */
+export const toPaise = (n) => Math.round(Number(n) * 100);
+
 export const scrollToSection = (id) => {
   const el = document.getElementById(id);
   if (!el) return;

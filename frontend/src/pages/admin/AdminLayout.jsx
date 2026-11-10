@@ -1,7 +1,10 @@
-import { useLocation, Link } from "react-router-dom";
+import { useLocation, Link, Routes, Route } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { LogOut, ArrowRight } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
+import Overview from "./Overview";
+import Products from "./Products";
+import Categories from "./Categories";
 
 const NAV = [
   { key: "overview", label: "Overview", to: "/admin", icon: <LayoutDashboardIcon /> },
@@ -136,7 +139,12 @@ export default function AdminLayout() {
               transition={{ duration: 0.2 }}
               className="p-6"
             >
-              <Outlet />
+              <Routes>
+                <Route index element={<Overview />} />
+                <Route path="products" element={<Products tab="list" />} />
+                <Route path="new-arrivals" element={<Products tab="arrivals" />} />
+                <Route path="categories" element={<Categories />} />
+              </Routes>
             </motion.div>
           </AnimatePresence>
         </main>

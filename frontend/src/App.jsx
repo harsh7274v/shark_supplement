@@ -8,7 +8,6 @@ import { CartProvider } from "./context/CartContext";
 import { useAuth } from "./context/AuthContext";
 import Home from "./pages/Home";
 import AuthCallback from "./pages/AuthCallback";
-import Overview from "./pages/admin/Overview";
 
 const AdminLayout = lazy(() => import("./pages/admin/AdminLayout"));
 
@@ -77,7 +76,7 @@ function AppRouter() {
           )
         }
       >
-        <Route index element={<Overview />} />
+        {/* AdminLayout owns the admin sub-routes (Overview, Products, Categories, New Arrivals). */}
       </Route>
     </Routes>
   );
