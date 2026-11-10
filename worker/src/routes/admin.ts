@@ -1240,3 +1240,375 @@ adminRoutes.get("/payments", async (c: AdminContext) => {
 
   return c.json(results);
 });
+
+/** The message of a coupon that is not there. */
+const COUPON_NOT_FOUND = "Coupon not found";
+
+/** The message of a coupon code another coupon already took. */
+const CODE_TAKEN = "Coupon code already in use";
+
+/** The message of a coupon body without a code. */
+const CODE_REQUIRED = "Coupon code is required";
+
+/** The message of a discount type that is not percent or flat. */
+const BAD_DISCOUNT_TYPE = "Discount type must be percent or flat";
+
+/** The message of a discount value that is not a number. */
+const BAD_DISCOUNT_VALUE = "Discount value must be a number";
+
+/** The message of a discount value below zero. */
+const NEGATIVE_DISCOUNT_VALUE = "Discount value cannot be negative";
+
+/** The message of a min order that is not a number. */
+const BAD_MIN_ORDER = "Min order must be a number";
+
+/** The message of a min order below zero. */
+const NEGATIVE_MIN_ORDER = "Min order cannot be negative";
+
+/** The message of an active flag that is not 0 or 1. */
+const BAD_ACTIVE = "active must be 0 or 1";
+
+/** A coupon row, as the database has it. */
+interface CouponRow {
+  id: string;
+  code: string;
+  discount_type: "percent" | "flat";
+  discount_value: number;
+  min_order: number;
+  active: number;
+}
+
+/** A coupon, as the API serves it. */
+interface CouponJson {
+  id: string;
+  code: string;
+  discount_type: "percent" | "flat";
+  discount_value: number;
+  min_order: number;
+  active: number;
+}
+
+/** Turns a coupon row into the JSON the API serves. */
+function toCoupon(row: CouponRow): CouponJson {
+  return {
+    id: row.id,
+    code: row.code,
+    discount_type: row.discount_type,
+    discount_value: row.discount_value,
+    min_order: row.min_order,
+    active: row.active,
+  };
+}
+
+/** Reads the row of a coupon of the database. */
+async function readCouponRow(
+  db: D1Database,
+  id: string,
+): Promise<CouponRow | null> {
+  return db
+    .prepare(
+      `SELECT id, code, discount_type, discount_value, min_order, active
+       FROM coupons WHERE id = ?`,
+    )
+    .bind(id)
+    .first<CouponRow>();
+}
+
+/** Reads the coupon of the database, as the API serves it. */
+async function readCoupon(db: D1Database, id: string) {
+  const row = await readCouponRow(db, id);
+  return row === null ? null : toCoupon(row);
+}
+
+/** Reads the discount type of a body. */
+function readDiscountType(value: unknown): "percent" | "flat" | null {
+  if (value === "percent" || value === "flat") {
+    return value;
+  }
+  return null;
+}
+
+/** The aggregates of the admin dashboard. */
+adminRoutes.get("/overview", async (c: AdminContext) => {
+  const daysParam = c.req.query("days");
+  let days = 30;
+  if (daysParam !== null && daysParam !== "") {
+    const parsed = Number(daysParam);
+    if (Number.isFinite(parsed) && parsed >= 1) {
+      days = Math.round(parsed);
+    }
+  }
+
+  // Orders older than `days` days are outside the window; `datetime('now', ?)`
+  // takes the modifier as a bound value, so `-30 days` works like a literal.
+  const window = `-${days} days`;
+
+  const stats = await c.env.DB
+    .prepare(
+      `SELECT COUNT(*) AS orders, COALESCE(SUM(total), 0) AS revenue
+       FROM orders
+       WHERE status != 'cancelled' AND created_at >= datetime('now', ?)`,
+    )
+    .bind(window)
+    .first<{ orders: number; revenue: number }>();
+
+  const [revenueByDay, ordersByStatus, topProducts, lowStock] =
+    await Promise.all([
+      c.env.DB
+        .prepare(
+          `SELECT DATE(created_at) AS date, COALESCE(SUM(total), 0) AS total
+           FROM orders
+           WHERE status != 'cancelled' AND created_at >= datetime('now', ?)
+           GROUP BY DATE(created_at)
+           ORDER BY date ASC`,
+        )
+        .bind(window)
+        .all<{ date: string; total: number }>(),
+      c.env.DB
+        .prepare(
+          `SELECT status AS status, COUNT(*) AS count
+           FROM orders
+           WHERE status != 'cancelled' AND created_at >= datetime('now', ?)
+           GROUP BY status
+           ORDER BY status ASC`,
+        )
+        .bind(window)
+        .all<{ status: string; count: number }>(),
+      c.env.DB
+        .prepare(
+          `SELECT i.name AS name, SUM(i.qty) AS qty
+           FROM order_items i
+           JOIN orders o ON o.id = i.order_id
+           WHERE o.status != 'cancelled' AND o.created_at >= datetime('now', ?)
+           GROUP BY i.name
+           ORDER BY qty DESC, name ASC`,
+        )
+        .bind(window)
+        .all<{ name: string; qty: number }>(),
+      c.env.DB
+        .prepare(
+          `SELECT COUNT(*) AS low_stock
+           FROM products
+           WHERE is_active = 1 AND stock <= 10`,
+        )
+        .first<{ low_stock: number }>(),
+    ]);
+
+  const ordered = stats?.orders ?? 0;
+  const revenue = stats?.revenue ?? 0;
+
+  return c.json({
+    stats: {
+      revenue,
+      orders: ordered,
+      avg_order: ordered === 0 ? 0 : Math.round(revenue / ordered),
+      low_stock: lowStock?.low_stock ?? 0,
+    },
+    revenue_by_day: revenueByDay.results,
+    orders_by_status: ordersByStatus.results,
+    top_products: topProducts.results,
+  });
+});
+
+/** Wipes the demo data and leaves the catalog (products, coupons) untouched. */
+adminRoutes.post("/demo-data/reset", async (c: AdminContext) => {
+  // Children first, then the orders they belong to; foreign keys stay happy.
+  await c.env.DB.batch([
+    c.env.DB.prepare("DELETE FROM order_items"),
+    c.env.DB.prepare("DELETE FROM payments"),
+    c.env.DB.prepare("DELETE FROM order_status_history"),
+    c.env.DB.prepare("DELETE FROM email_log"),
+    c.env.DB.prepare("DELETE FROM orders"),
+  ]);
+
+  return c.json({ ok: true });
+});
+
+/** The coupons of the store, newest code first. */
+adminRoutes.get("/coupons", async (c: AdminContext) => {
+  const { results } = await c.env.DB
+    .prepare(
+      `SELECT id, code, discount_type, discount_value, min_order, active
+       FROM coupons
+       ORDER BY code ASC`,
+    )
+    .all<CouponRow>();
+
+  return c.json(results.map(toCoupon));
+});
+
+/** Creates a coupon: the code is uppercased and must be unique. */
+adminRoutes.post("/coupons", async (c: AdminContext) => {
+  const body = await readJsonBody(c);
+  if (!body) {
+    return c.json({ detail: INVALID_BODY }, 400);
+  }
+
+  const code = readString(body.code);
+  if (!code) {
+    return c.json({ detail: CODE_REQUIRED }, 400);
+  }
+  const upper = code.toUpperCase();
+
+  const discountType = readDiscountType(body.discount_type);
+  if (!discountType) {
+    return c.json({ detail: BAD_DISCOUNT_TYPE }, 400);
+  }
+
+  const discountValue = readMoney(body.discount_value);
+  if (discountValue === null) {
+    return c.json({ detail: BAD_DISCOUNT_VALUE }, 400);
+  }
+  if (discountValue < 0) {
+    return c.json({ detail: NEGATIVE_DISCOUNT_VALUE }, 400);
+  }
+
+  const minOrder = readMoney(body.min_order);
+  if (minOrder === null) {
+    return c.json({ detail: BAD_MIN_ORDER }, 400);
+  }
+  if (minOrder < 0) {
+    return c.json({ detail: NEGATIVE_MIN_ORDER }, 400);
+  }
+
+  const active = readFlag(body.active ?? 1);
+  if (active === null) {
+    return c.json({ detail: BAD_ACTIVE }, 400);
+  }
+
+  const taken = await c.env.DB
+    .prepare("SELECT id FROM coupons WHERE code = ?")
+    .bind(upper)
+    .first<{ id: string }>();
+  if (taken) {
+    return c.json({ detail: CODE_TAKEN }, 409);
+  }
+
+  const id = `coup_${randomHex(8)}`;
+  await c.env.DB
+    .prepare(
+      `INSERT INTO coupons (id, code, discount_type, discount_value, min_order, active)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(id, upper, discountType, discountValue, minOrder, active)
+    .run();
+
+  const coupon = await readCoupon(c.env.DB, id);
+  if (!coupon) {
+    return c.json({ detail: COUPON_NOT_FOUND }, 404);
+  }
+
+  return c.json(coupon, 201);
+});
+
+/** Changes a coupon: the fields given are replaced, the rest is kept. */
+adminRoutes.patch("/coupons/:id", async (c: AdminContext) => {
+  const id = c.req.param("id");
+  if (!id) {
+    return c.json({ detail: COUPON_NOT_FOUND }, 404);
+  }
+
+  const current = await readCouponRow(c.env.DB, id);
+  if (!current) {
+    return c.json({ detail: COUPON_NOT_FOUND }, 404);
+  }
+
+  const body = await readJsonBody(c);
+  if (!body) {
+    return c.json({ detail: INVALID_BODY }, 400);
+  }
+
+  let code = current.code;
+  if (body.code !== undefined) {
+    const given = readString(body.code);
+    if (!given) {
+      return c.json({ detail: CODE_REQUIRED }, 400);
+    }
+    code = given.toUpperCase();
+  }
+
+  let discountType = current.discount_type;
+  if (body.discount_type !== undefined) {
+    const given = readDiscountType(body.discount_type);
+    if (!given) {
+      return c.json({ detail: BAD_DISCOUNT_TYPE }, 400);
+    }
+    discountType = given;
+  }
+
+  let discountValue = current.discount_value;
+  if (body.discount_value !== undefined) {
+    const given = readMoney(body.discount_value);
+    if (given === null) {
+      return c.json({ detail: BAD_DISCOUNT_VALUE }, 400);
+    }
+    if (given < 0) {
+      return c.json({ detail: NEGATIVE_DISCOUNT_VALUE }, 400);
+    }
+    discountValue = given;
+  }
+
+  let minOrder = current.min_order;
+  if (body.min_order !== undefined) {
+    const given = readMoney(body.min_order);
+    if (given === null) {
+      return c.json({ detail: BAD_MIN_ORDER }, 400);
+    }
+    if (given < 0) {
+      return c.json({ detail: NEGATIVE_MIN_ORDER }, 400);
+    }
+    minOrder = given;
+  }
+
+  let active = current.active;
+  if (body.active !== undefined) {
+    const given = readFlag(body.active);
+    if (given === null) {
+      return c.json({ detail: BAD_ACTIVE }, 400);
+    }
+    active = given;
+  }
+
+  if (code !== current.code) {
+    const taken = await c.env.DB
+      .prepare("SELECT id FROM coupons WHERE code = ? AND id != ?")
+      .bind(code, id)
+      .first<{ id: string }>();
+    if (taken) {
+      return c.json({ detail: CODE_TAKEN }, 409);
+    }
+  }
+
+  await c.env.DB
+    .prepare(
+      `UPDATE coupons SET code = ?, discount_type = ?, discount_value = ?,
+                       min_order = ?, active = ? WHERE id = ?`,
+    )
+    .bind(code, discountType, discountValue, minOrder, active, id)
+    .run();
+
+  const coupon = await readCoupon(c.env.DB, id);
+  if (!coupon) {
+    return c.json({ detail: COUPON_NOT_FOUND }, 404);
+  }
+
+  return c.json(coupon);
+});
+
+/** Removes a coupon. */
+adminRoutes.delete("/coupons/:id", async (c: AdminContext) => {
+  const id = c.req.param("id");
+  if (!id) {
+    return c.json({ detail: COUPON_NOT_FOUND }, 404);
+  }
+
+  const result = await c.env.DB.prepare("DELETE FROM coupons WHERE id = ?")
+    .bind(id)
+    .run();
+
+  if ((result.meta?.changes ?? 0) === 0) {
+    return c.json({ detail: COUPON_NOT_FOUND }, 404);
+  }
+
+  return c.json({ ok: true });
+});
