@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { API, scrollToSection } from "../lib/api";
+import { DEFAULT_CATEGORIES } from "../data/defaultCatalog";
 import Header from "../components/Header";
 import Hero from "../components/Hero";
 import Marquee from "../components/Marquee";
@@ -12,11 +13,15 @@ import AuthModal from "../components/AuthModal";
 
 export default function Home() {
   const [activeCategory, setActiveCategory] = useState("all");
-  const [categories, setCategories] = useState([]);
+  const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
 
   useEffect(() => {
     API.get("/categories")
-      .then((r) => setCategories(r.data))
+      .then((r) => {
+        if (Array.isArray(r.data) && r.data.length > 0) {
+          setCategories(r.data);
+        }
+      })
       .catch(() => {});
   }, []);
 
@@ -41,4 +46,3 @@ export default function Home() {
     </div>
   );
 }
-

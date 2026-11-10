@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowUpDown, Check, ChevronDown } from "lucide-react";
 import { API } from "../lib/api";
+import { DEFAULT_PRODUCTS } from "../data/defaultCatalog";
 import ProductCard from "./ProductCard";
 
 const EASE = [0.16, 1, 0.3, 1];
@@ -58,18 +59,43 @@ export function SortDropdown({ sort, onSort }) {
 
 export default function ShopSection({ categories, activeCategory, onNavCategory }) {
   const [sort, setSort] = useState("most_ordered");
-  const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [products, setProducts] = useState(DEFAULT_PRODUCTS);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
     const params = { sort, limit: 8 };
     if (activeCategory && activeCategory !== "all") params.category = activeCategory;
+
+    const fallbackFilter = () => {
+      let list = [...DEFAULT_PRODUCTS];
+      if (activeCategory && activeCategory !== "all") {
+        list = list.filter((p) => p.category === activeCategory);
+      }
+      if (sort === "price_asc") list.sort((a, b) => a.price - b.price);
+      else if (sort === "price_desc") list.sort((a, b) => b.price - a.price);
+      else if (sort === "top_rated") list.sort((a, b) => b.rating - a.rating);
+      else list.sort((a, b) => b.orders_count - a.orders_count);
+      return list;
+    };
+
     API.get("/products", { params })
-      .then((r) => { if (alive) setProducts(r.data); })
-      .catch(() => { if (alive) setProducts([]); })
-      .finally(() => { if (alive) setLoading(false); });
+      .then((r) => {
+        if (alive && Array.isArray(r.data) && r.data.length > 0) {
+          setProducts(r.data);
+        } else if (alive) {
+          setProducts(fallbackFilter());
+        }
+      })
+      .catch(() => {
+        if (alive) {
+          setProducts(fallbackFilter());
+        }
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
     return () => { alive = false; };
   }, [activeCategory, sort]);
 
@@ -147,4 +173,3 @@ export default function ShopSection({ categories, activeCategory, onNavCategory 
     </section>
   );
 }
-

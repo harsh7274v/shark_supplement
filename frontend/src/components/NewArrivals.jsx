@@ -2,16 +2,24 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Sparkles, ArrowRight } from "lucide-react";
 import { API } from "../lib/api";
+import { DEFAULT_PRODUCTS } from "../data/defaultCatalog";
 import ProductCard from "./ProductCard";
 
 const EASE = [0.16, 1, 0.3, 1];
 
 export default function NewArrivals() {
-  const [products, setProducts] = useState([]);
+  const [products, setProducts] = useState(() =>
+    DEFAULT_PRODUCTS.filter((p) => p.badge === "NEW").slice(0, 4)
+  );
+
   useEffect(() => {
     let alive = true;
     API.get("/products", { params: { sort: "newest", limit: 4 } })
-      .then((r) => { if (alive) setProducts(r.data); })
+      .then((r) => {
+        if (alive && Array.isArray(r.data) && r.data.length > 0) {
+          setProducts(r.data);
+        }
+      })
       .catch(() => {});
     return () => { alive = false; };
   }, []);
@@ -70,4 +78,3 @@ export default function NewArrivals() {
     </section>
   );
 }
-

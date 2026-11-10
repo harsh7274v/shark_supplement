@@ -5,19 +5,19 @@ import { scrollToSection } from "../lib/api";
 
 const SLIDES = [
   {
-    img: "https://static.prod-images.emergentagent.com/jobs/b4b184a7-61cc-48cf-8785-6a97df82610f/images/5a5c8e5dc62bb65e98467a63c2c5b7f68bc8c85290581e11151fcb0e169504af.jpeg",
+    img: "/images/hero_1.jpg",
     kicker: "WHEY ISOLATE",
     title: "Kinetic Gold",
     sub: "24g protein · 0g added sugar",
   },
   {
-    img: "https://static.prod-images.emergentagent.com/jobs/b4b184a7-61cc-48cf-8785-6a97df82610f/images/f3475de57b85844fd077c2fd1ae08ecd14b9da2b13234660b88181e5db073ca4.jpeg",
+    img: "/images/hero_2.jpg",
     kicker: "PRE-WORKOUT",
     title: "Surge 300",
     sub: "300mg caffeine · skin-splitting pumps",
   },
   {
-    img: "https://static.prod-images.emergentagent.com/jobs/b4b184a7-61cc-48cf-8785-6a97df82610f/images/ba1969d65080a0e76e0a465b6ae52c296484c52fe4b64e52fa2f84a0334c276a.jpeg",
+    img: "/images/hero_3.jpg",
     kicker: "BESTSELLER",
     title: "The Gold Standard",
     sub: "Lab tested · banned-substance free",
@@ -220,4 +220,3 @@ export default function Hero() {
     </section>
   );
 }
-
