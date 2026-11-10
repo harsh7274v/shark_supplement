@@ -168,18 +168,18 @@ export default function CheckoutModal({ open, onClose }) {
                   <p className="text-sm text-slate-500 font-semibold max-w-xs">
                     Order <span className="font-extrabold text-slate-900" data-testid="order-success-id">{placed.order_id}</span> is confirmed.
                     {placed.payment_method === "cod"
-                      ? ` Keep ${inr(placed.total)} ready at your door.`
+                      ? ` Keep ${inr(placed.total / 100)} ready at your door.`
                       : " You'll pay online when payments go live."}
                   </p>
                   <div className="w-full rounded-2xl bg-slate-50 border border-slate-100 p-4 mt-2 text-sm font-semibold text-slate-600 space-y-1" data-testid="order-success-summary">
                     <div className="flex justify-between"><span>Items</span><span>{placed.items.reduce((s, i) => s + i.qty, 0)}</span></div>
                     {placed.discount > 0 && (
                       <div className="flex justify-between text-emerald-600 font-extrabold">
-                        <span>{placed.coupon_code} discount</span><span>−{inr(placed.discount)}</span>
+                        <span>{placed.coupon_code} discount</span><span>−{inr(placed.discount / 100)}</span>
                       </div>
                     )}
                     <div className="flex justify-between font-display font-black text-base text-slate-900 pt-1">
-                      <span>Total</span><span>{inr(placed.total)}</span>
+                      <span>Total</span><span>{inr(placed.total / 100)}</span>
                     </div>
                   </div>
                 </div>
@@ -212,7 +212,7 @@ export default function CheckoutModal({ open, onClose }) {
                     className="flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl bg-kinetic-ink text-white font-extrabold hover:bg-slate-800 transition-colors disabled:opacity-60"
                   >
                     {placing ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
-                    {placing ? "Placing order…" : `Place Order · ${inr(total)}`}
+                    {placing ? "Placing order…" : `Place Order · ${inr(total / 100)}`}
                   </button>
                 </div>
               )}

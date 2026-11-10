@@ -8,7 +8,18 @@ const EASE = [0.16, 1, 0.3, 1];
 
 export default function ProductCard({ product, index = 0 }) {
   const { addItem, setCartOpen } = useCart();
-  const discount = Math.round((1 - product.price / product.mrp) * 100);
+  // The Worker API serves money in integer paise and images as an array;
+  // the fallback catalogue serves rupees with a singular `image`. Both
+  // shapes show up (live API vs offline fallback), so normalize on read.
+  const apiShape = product.sale_price != null;
+  const salePrice = apiShape ? product.sale_price : product.price * 100;
+  const mrpPrice = apiShape ? product.mrp : product.mrp * 100;
+  const discount =
+    product.discount_percent != null
+      ? product.discount_percent
+      : mrpPrice > 0
+        ? Math.round((1 - salePrice / mrpPrice) * 100)
+        : 0;
 
   const handleAdd = () => {
     addItem(product);
@@ -35,7 +46,7 @@ export default function ProductCard({ product, index = 0 }) {
     >
       <div className="relative aspect-square bg-slate-50 overflow-hidden">
         <img
-          src={product.image}
+          src={product.images?.[0] ?? product.image}
           alt={product.name}
           loading="lazy"
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
@@ -67,15 +78,17 @@ export default function ProductCard({ product, index = 0 }) {
           <span className="flex items-center gap-1 text-xs font-bold text-slate-700">
             <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
             {product.rating.toFixed(1)}
-            <span className="text-slate-400 font-semibold">({product.reviews_count.toLocaleString("en-IN")})</span>
+            {product.reviews_count != null && (
+              <span className="text-slate-400 font-semibold">({product.reviews_count.toLocaleString("en-IN")})</span>
+            )}
           </span>
         </div>
         <h3 className="font-display font-bold text-lg leading-snug text-slate-900 tracking-tight">
           {product.name}
         </h3>
         <div className="flex items-baseline gap-2 mt-auto pt-1.5">
-          <span className="font-display font-black text-xl text-slate-900">{inr(product.price)}</span>
-          <span className="text-sm text-slate-400 line-through font-semibold">{inr(product.mrp)}</span>
+          <span className="font-display font-black text-xl text-slate-900">{inr(salePrice / 100)}</span>
+          <span className="text-sm text-slate-400 line-through font-semibold">{inr(mrpPrice / 100)}</span>
         </div>
         <div className="grid grid-cols-2 gap-2 pt-2">
           <button

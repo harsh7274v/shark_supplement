@@ -58,7 +58,7 @@ export default function Categories({ categories, activeCategory, onNavCategory }
                   }`}
                 >
                   <img
-                    src={cat.image}
+                    src={cat.image_url ?? cat.image}
                     alt={cat.name}
                     loading="lazy"
                     className="w-full h-full object-cover group-hover:scale-110 group-hover:rotate-3 transition-transform duration-500"
@@ -79,7 +79,7 @@ export default function Categories({ categories, activeCategory, onNavCategory }
                     {cat.name}
                   </span>
                   <span className="text-xs text-slate-400 font-semibold mt-0.5">
-                    {cat.count ?? 0} products
+                    {cat.product_count ?? cat.count ?? 0} products
                   </span>
                 </span>
               </motion.button>

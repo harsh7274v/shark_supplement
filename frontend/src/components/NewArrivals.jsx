@@ -14,9 +14,9 @@ export default function NewArrivals() {
 
   useEffect(() => {
     let alive = true;
-    API.get("/products", { params: { sort: "newest", limit: 4 } })
+    API.get("/products", { params: { new_arrivals: "1", limit: 4 } })
       .then((r) => {
-        if (alive && Array.isArray(r.data) && r.data.length > 0) {
+        if (alive && Array.isArray(r.data)) {
           setProducts(r.data);
         }
       })

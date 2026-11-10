@@ -8,12 +8,9 @@ import { CartProvider } from "./context/CartContext";
 import { useAuth } from "./context/AuthContext";
 import Home from "./pages/Home";
 import AuthCallback from "./pages/AuthCallback";
+import MyOrders from "./pages/MyOrders";
 
 const AdminLayout = lazy(() => import("./pages/admin/AdminLayout"));
-
-function MyOrders() {
-  return <div className="min-h-screen bg-white py-12 px-6 text-center"><h2 className="font-display font-bold text-2xl text-slate-900">My Orders</h2><p className="text-slate-500 mt-2">Your order history will appear here.</p></div>;
-}
 
 class ErrorBoundary extends Component {
   state = { error: null };

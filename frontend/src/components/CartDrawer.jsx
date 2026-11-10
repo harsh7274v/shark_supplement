@@ -7,7 +7,7 @@ import { useCart } from "../context/CartContext";
 import CheckoutModal from "./CheckoutModal";
 
 const EASE = [0.16, 1, 0.3, 1];
-const FREE_SHIP_AT = 999;
+const FREE_SHIP_AT_PAISE = 99900; // ₹999
 
 export default function CartDrawer() {
   const {
@@ -31,7 +31,7 @@ export default function CartDrawer() {
     }
   };
 
-  const progress = Math.min(100, Math.round(((subtotal - discount) / FREE_SHIP_AT) * 100));
+  const progress = Math.min(100, Math.round(((subtotal - discount) / FREE_SHIP_AT_PAISE) * 100));
 
   return (
     <>
@@ -105,7 +105,7 @@ export default function CartDrawer() {
                         data-testid={`cart-item-${item.product.id}`}
                       >
                         <img
-                          src={item.product.image}
+                          src={item.product.images?.[0] ?? item.product.image}
                           alt={item.product.name}
                           className="w-20 h-20 rounded-xl object-cover bg-slate-50 shrink-0"
                         />
@@ -143,7 +143,7 @@ export default function CartDrawer() {
                             </div>
                             <div className="flex items-center gap-2">
                               <p className="font-display font-black text-slate-900">
-                                {inr(item.product.price * item.qty)}
+                                {inr((item.product.price * item.qty) / 100)}
                               </p>
                               <button
                                 data-testid={`cart-item-remove-${item.product.id}`}
@@ -161,11 +161,11 @@ export default function CartDrawer() {
                   </div>
 
                   <div className="border-t border-slate-100 px-6 py-4 space-y-3.5">
-                    {subtotal - discount < FREE_SHIP_AT && (
+                    {subtotal - discount < FREE_SHIP_AT_PAISE && (
                       <div>
                         <p className="text-xs font-bold text-slate-600 flex items-center gap-1.5 mb-1.5">
                           <Truck className="w-3.5 h-3.5 text-kinetic-orange" />
-                          Add {inr(FREE_SHIP_AT - (subtotal - discount))} more for FREE express shipping
+                          Add {inr((FREE_SHIP_AT_PAISE - (subtotal - discount)) / 100)} more for FREE express shipping
                         </p>
                         <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
                           <motion.div
@@ -224,27 +224,27 @@ export default function CartDrawer() {
                     <div className="space-y-1.5 text-sm font-semibold" data-testid="cart-pricing-summary">
                       <div className="flex justify-between text-slate-600">
                         <span>Subtotal</span>
-                        <span>{inr(subtotal)}</span>
+                        <span>{inr(subtotal / 100)}</span>
                       </div>
                       {discount > 0 && (
                         <div className="flex justify-between text-emerald-600 font-extrabold">
                           <span>Coupon discount</span>
-                          <span>−{inr(discount)}</span>
+                          <span>−{inr(discount / 100)}</span>
                         </div>
                       )}
                       <div className="flex justify-between text-slate-600">
                         <span>GST (5%)</span>
-                        <span>{inr(gst)}</span>
+                        <span>{inr(gst / 100)}</span>
                       </div>
                       <div className="flex justify-between text-slate-600">
                         <span>Express shipping</span>
                         <span className={shipping === 0 ? "text-emerald-600 font-extrabold" : ""}>
-                          {shipping === 0 ? "FREE" : inr(shipping)}
+                          {shipping === 0 ? "FREE" : inr(shipping / 100)}
                         </span>
                       </div>
                       <div className="flex justify-between border-t border-dashed border-slate-200 pt-2.5 mt-1 font-display font-black text-lg text-slate-900">
                         <span>Total</span>
-                        <span data-testid="cart-total-amount">{inr(total)}</span>
+                        <span data-testid="cart-total-amount">{inr(total / 100)}</span>
                       </div>
                     </div>
 
@@ -254,7 +254,7 @@ export default function CartDrawer() {
                       className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-kinetic-red text-white font-extrabold text-base hover:bg-kinetic-orange transition-colors shadow-[0_14px_30px_-12px_rgba(255,59,48,0.6)]"
                     >
                       <ShieldCheck className="w-5 h-5" />
-                      Checkout · {inr(total)}
+                      Checkout · {inr(total / 100)}
                     </button>
                   </div>
                 </>

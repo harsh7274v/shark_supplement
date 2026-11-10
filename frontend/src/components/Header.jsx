@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { ShoppingBag, Menu, X, ChevronDown, LogOut, UserRound } from "lucide-react";
+import { ShoppingBag, Menu, X, ChevronDown, LogOut, UserRound, Package } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useCart } from "../context/CartContext";
 import { scrollToSection } from "../lib/api";
@@ -104,6 +104,13 @@ export default function Header({ onNavCategory }) {
                         <p className="text-sm font-extrabold text-slate-900 truncate">{user.name}</p>
                         <p className="text-xs text-slate-500 truncate">{user.email}</p>
                       </div>
+                      <button
+                        data-testid="my-orders-link"
+                        onClick={() => { setUserMenu(false); navigate("/my-orders"); }}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 rounded-xl transition-colors"
+                      >
+                        <Package className="w-4 h-4" /> My Orders
+                      </button>
                       {user.role === "admin" && (
                         <button
                           data-testid="admin-dashboard-link"

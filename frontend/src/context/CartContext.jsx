@@ -1,9 +1,9 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
-import { API, formatApiError } from "../lib/api";
+import { API, formatApiError, inr } from "../lib/api";
 
 const CartContext = createContext(null);
 export const useCart = () => useContext(CartContext);
-const STORAGE_KEY = "kinetic_cart_v1";
+const STORAGE_KEY = "kinetic_cart_v2"; // cart math now runs in integer paise
 
 export function CartProvider({ children }) {
   const [items, setItems] = useState(() => {
@@ -21,6 +21,13 @@ export function CartProvider({ children }) {
   }, [items]);
 
   const addItem = useCallback((product, opts = {}) => {
+    // The Worker API serves money in integer paise; the fallback catalogue
+    // serves rupees. `sale_price` is present only on API-shaped products.
+    const apiShape = product.sale_price != null;
+    const price = apiShape
+      ? Math.round(Number(product.sale_price))
+      : Math.round(Number(product.price) * 100);
+    const mrp = apiShape ? Math.round(Number(product.mrp)) : Math.round(Number(product.mrp) * 100);
     const flavor = opts.flavor ?? (product.flavors?.[0] || null);
     const weight = opts.weight ?? (product.weight_options?.[0] || null);
     const qty = opts.qty || 1;
@@ -40,9 +47,9 @@ export function CartProvider({ children }) {
             id: product.id,
             name: product.name,
             brand: product.brand,
-            price: product.price,
-            mrp: product.mrp,
-            image: product.image,
+            price,
+            mrp,
+            image: product.images?.[0] ?? product.image,
             flavors: product.flavors || [],
             weight_options: product.weight_options || [],
           },
@@ -71,14 +78,23 @@ export function CartProvider({ children }) {
     setCoupon(null);
   }, []);
 
+  // All cart math runs in integer paise; rupees only at display time.
   const subtotal = items.reduce((s, i) => s + i.product.price * i.qty, 0);
+
+  const FREE_SHIP_PAISE = 99900; // ₹999
+  const SHIPPING_PAISE = 7900; // ₹79
 
   const applyCoupon = useCallback(
     async (code) => {
       try {
         const { data } = await API.post("/coupons/validate", { code, subtotal });
-        setCoupon({ code: data.code, discount: data.discount, label: data.label });
-        return { ok: true, label: data.label };
+        // The Worker answers HTTP 200 in both cases; validity is `data.valid`.
+        if (!data.valid) {
+          setCoupon(null);
+          return { ok: false, error: "This coupon is not valid for your cart." };
+        }
+        setCoupon({ code: data.code, discount: data.discount, label: `−${inr(data.discount / 100)}` });
+        return { ok: true, label: `−${inr(data.discount / 100)}` };
       } catch (e) {
         setCoupon(null);
         return { ok: false, error: formatApiError(e) };
@@ -91,7 +107,7 @@ export function CartProvider({ children }) {
 
   const discount = coupon ? Math.min(coupon.discount, subtotal) : 0;
   const gst = items.length ? Math.round((subtotal - discount) * 0.05) : 0;
-  const shipping = !items.length ? 0 : subtotal - discount >= 999 ? 0 : 79;
+  const shipping = !items.length ? 0 : subtotal - discount >= FREE_SHIP_PAISE ? 0 : SHIPPING_PAISE;
   const total = subtotal - discount + gst + shipping;
 
   const value = useMemo(
