@@ -5,6 +5,9 @@ import { useAuth } from "../../context/AuthContext";
 import Overview from "./Overview";
 import Products from "./Products";
 import Categories from "./Categories";
+import Orders from "./Orders";
+import Payments from "./Payments";
+import Coupons from "./Coupons";
 
 const NAV = [
   { key: "overview", label: "Overview", to: "/admin", icon: <LayoutDashboardIcon /> },
@@ -67,7 +70,9 @@ export default function AdminLayout() {
             className="space-y-1"
           >
             {NAV.map((item, i) => {
-              const active = location.pathname === item.to;
+              const active =
+                location.pathname === item.to ||
+                (item.to !== "/" && location.pathname.startsWith(`${item.to}/`));
               return (
                 <Link
                   key={item.key}
@@ -144,6 +149,10 @@ export default function AdminLayout() {
                 <Route path="products" element={<Products tab="list" />} />
                 <Route path="new-arrivals" element={<Products tab="arrivals" />} />
                 <Route path="categories" element={<Categories />} />
+                <Route path="orders" element={<Orders />} />
+                <Route path="orders/:id" element={<Orders />} />
+                <Route path="payments" element={<Payments />} />
+                <Route path="coupons" element={<Coupons />} />
               </Routes>
             </motion.div>
           </AnimatePresence>
