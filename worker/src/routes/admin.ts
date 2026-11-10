@@ -26,6 +26,8 @@ import {
   readText,
 } from "../lib/admin-common";
 import { randomHex } from "../lib/auth-common";
+import { sendMail } from "../lib/email";
+import { orderStatusEmail } from "../lib/email-templates";
 import { readJsonBody } from "../lib/http";
 import { discountPercent } from "../lib/money";
 import { requireAdmin } from "../middleware/auth";
@@ -650,4 +652,591 @@ adminRoutes.delete("/products/:id", async (c: AdminContext) => {
   }
 
   return c.json({ ok: true });
+});
+
+/** The message of an order that is not there. */
+const ORDER_NOT_FOUND = "Order not found";
+
+/** The message of a contact and address block that cannot be replaced anymore. */
+const ORDER_NOT_EDITABLE = "Order can no longer be edited";
+
+/** The message of a cancellation the pipeline does not allow. */
+const CANNOT_CANCEL_AFTER_SHIPPING = "Cannot cancel after shipping";
+
+/** The message of a status the pipeline does not know. */
+const INVALID_STATUS = "Invalid status";
+
+/** The message of a shipping block that is not complete. */
+const SHIPPING_REQUIRED = "Shipping details are required";
+
+/** The days an order takes to be delivered; the default estimate. */
+const ADMIN_DELIVERY_DAYS = 5;
+
+/** The next status of a status in the legal pipeline. */
+const ORDER_NEXT: Record<string, string> = {
+  placed: "confirmed",
+  confirmed: "shipped",
+  shipped: "delivered",
+};
+
+/** The statuses the pipeline knows. */
+const VALID_STATUSES = new Set([
+  "placed",
+  "confirmed",
+  "shipped",
+  "delivered",
+  "cancelled",
+]);
+
+/** The note of a history row of a status change. */
+function statusNote(status: string): string {
+  return `Order ${status.charAt(0).toUpperCase() + status.slice(1)}`;
+}
+
+/** The date an order is expected to be delivered, a few days out. */
+function deliveryEstimate(): string {
+  return new Date(Date.now() + ADMIN_DELIVERY_DAYS * 86_400_000).toISOString().slice(0, 10);
+}
+
+/** An order row of the database, without the computed admin columns. */
+interface OrderRow {
+  id: string;
+  order_number: string;
+  user_id: string | null;
+  name: string;
+  email: string;
+  phone: string | null;
+  address: string | null;
+  subtotal: number;
+  discount: number;
+  coupon_code: string | null;
+  gst: number;
+  shipping: number;
+  total: number;
+  status: string;
+  estimated_delivery_date: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A line of an order, as the database has it. */
+interface OrderItemRow {
+  id: string;
+  order_id: string;
+  product_id: string | null;
+  name: string;
+  unit_price: number;
+  qty: number;
+  flavor: string | null;
+  weight: string | null;
+}
+
+/** A status history row, as the database has it. */
+interface HistoryRow {
+  id: string;
+  order_id: string;
+  status: string;
+  note: string | null;
+  created_at: string;
+}
+
+/** A payment row, as the database has it. */
+interface PaymentRow {
+  id: string;
+  order_id: string;
+  method: string;
+  amount: number;
+  status: string;
+  created_at: string;
+}
+
+/** A row of the log of the mails, as the database has it. */
+interface MailLogRow {
+  id: string;
+  order_id: string | null;
+  to_email: string;
+  template: string;
+  status: string;
+  error: string | null;
+  created_at: string;
+}
+
+/** An order row of the admin list, with its computed columns. */
+interface AdminOrderRow {
+  id: string;
+  order_number: string;
+  user_id: string | null;
+  name: string;
+  email: string;
+  phone: string | null;
+  address: string | null;
+  subtotal: number;
+  discount: number;
+  coupon_code: string | null;
+  gst: number;
+  shipping: number;
+  total: number;
+  status: string;
+  estimated_delivery_date: string | null;
+  created_at: string;
+  updated_at: string;
+  item_count: number;
+  payment_method: string | null;
+  payment_status: string | null;
+}
+
+/** A payment of the admin list, joined with the number of its order. */
+interface PaymentWithOrder extends PaymentRow {
+  order_number: string;
+}
+
+/** The detail of an order, as the admin detail serves it. */
+interface OrderDetail {
+  id: string;
+  order_number: string;
+  user_id: string | null;
+  name: string;
+  email: string;
+  phone: string | null;
+  address: Record<string, string> | null;
+  subtotal: number;
+  discount: number;
+  coupon_code: string | null;
+  gst: number;
+  shipping: number;
+  total: number;
+  status: string;
+  estimated_delivery_date: string | null;
+  created_at: string;
+  updated_at: string;
+  items: {
+    id: string;
+    product_id: string | null;
+    name: string;
+    unit_price: number;
+    qty: number;
+    flavor: string | null;
+    weight: string | null;
+  }[];
+  payment: PaymentRow | null;
+  status_history: {
+    id: string;
+    status: string;
+    note: string | null;
+    created_at: string;
+  }[];
+  email_log: {
+    id: string;
+    to_email: string;
+    template: string;
+    status: string;
+    error: string | null;
+    created_at: string;
+  }[];
+}
+
+/** The shipping block of a body: name, phone, email, address, city, pincode. */
+interface ShippingBlock {
+  full_name: string;
+  phone: string;
+  email: string;
+  address: string;
+  city: string;
+  pincode: string;
+}
+
+/** Reads a string of a body; anything else reads as an empty string. */
+function readAdminString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/** The shipping block of a body, or `null` when one of its fields is missing. */
+function readShippingBlock(value: unknown): ShippingBlock | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  const raw = value as Record<string, unknown>;
+  const block: ShippingBlock = {
+    full_name: readAdminString(raw.full_name),
+    phone: readAdminString(raw.phone),
+    email: readAdminString(raw.email),
+    address: readAdminString(raw.address),
+    city: readAdminString(raw.city),
+    pincode: readAdminString(raw.pincode),
+  };
+
+  if (Object.values(block).some((field) => field === "")) {
+    return null;
+  }
+
+  return block;
+}
+
+/** The address of an order, read from the json blob of its column. */
+function parseAddress(value: string | null): Record<string, string> | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed as Record<string, string>;
+  } catch {
+    return null;
+  }
+}
+
+/** A fresh id for a history row. */
+function newId(prefix: string): string {
+  return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+}
+
+/** Reads the row of an order of the database. */
+async function readOrderRow(
+  db: D1Database,
+  id: string,
+): Promise<OrderRow | null> {
+  return db
+    .prepare(
+      `SELECT id, order_number, user_id, name, email, phone, address, subtotal,
+              discount, coupon_code, gst, shipping, total, status,
+              estimated_delivery_date, created_at, updated_at
+       FROM orders WHERE id = ?`,
+    )
+    .bind(id)
+    .first<OrderRow>();
+}
+
+/** Reads the detail of an order: the order, its items, its payment, its
+ * status history and its mail log. */
+async function readOrderDetail(
+  db: D1Database,
+  id: string,
+): Promise<OrderDetail | null> {
+  const order = await readOrderRow(db, id);
+  if (!order) {
+    return null;
+  }
+
+  const [items, payment, history, mailLog] = await Promise.all([
+    db
+      .prepare(
+        `SELECT id, order_id, product_id, name, unit_price, qty, flavor, weight
+         FROM order_items WHERE order_id = ? ORDER BY id ASC`,
+      )
+      .bind(id)
+      .all<OrderItemRow>(),
+    db
+      .prepare(
+        `SELECT id, order_id, method, amount, status, created_at
+         FROM payments WHERE order_id = ? ORDER BY created_at DESC, id DESC LIMIT 1`,
+      )
+      .bind(id)
+      .first<PaymentRow>(),
+    db
+      .prepare(
+        `SELECT id, status, note, created_at
+         FROM order_status_history WHERE order_id = ? ORDER BY created_at ASC, id ASC`,
+      )
+      .bind(id)
+      .all<HistoryRow>(),
+    db
+      .prepare(
+        `SELECT id, order_id, to_email, template, status, error, created_at
+         FROM email_log WHERE order_id = ? ORDER BY created_at ASC, id ASC`,
+      )
+      .bind(id)
+      .all<MailLogRow>(),
+  ]);
+
+  return {
+    id: order.id,
+    order_number: order.order_number,
+    user_id: order.user_id,
+    name: order.name,
+    email: order.email,
+    phone: order.phone,
+    address: parseAddress(order.address),
+    subtotal: order.subtotal,
+    discount: order.discount,
+    coupon_code: order.coupon_code,
+    gst: order.gst,
+    shipping: order.shipping,
+    total: order.total,
+    status: order.status,
+    estimated_delivery_date: order.estimated_delivery_date,
+    created_at: order.created_at,
+    updated_at: order.updated_at,
+    items: items.results.map((item) => ({
+      id: item.id,
+      product_id: item.product_id,
+      name: item.name,
+      unit_price: item.unit_price,
+      qty: item.qty,
+      flavor: item.flavor,
+      weight: item.weight,
+    })),
+    payment: payment ?? null,
+    status_history: history.results.map((entry) => ({
+      id: entry.id,
+      status: entry.status,
+      note: entry.note,
+      created_at: entry.created_at,
+    })),
+    email_log: mailLog.results.map((entry) => ({
+      id: entry.id,
+      to_email: entry.to_email,
+      template: entry.template,
+      status: entry.status,
+      error: entry.error,
+      created_at: entry.created_at,
+    })),
+  };
+}
+
+/**
+ * The orders of the store, all of them, newest day first. The rows of the day
+ * with `status = 'placed'` are served first, so the client can highlight
+ * them. Each row carries the number of its items and a summary of its
+ * payment.
+ */
+adminRoutes.get("/orders", async (c: AdminContext) => {
+  const status = readString(c.req.query("status"));
+  const q = readString(c.req.query("q"));
+
+  const conditions: string[] = [];
+  const bindings: unknown[] = [];
+  if (status) {
+    conditions.push("o.status = ?");
+    bindings.push(status);
+  }
+  if (q) {
+    const like = `%${q}%`;
+    conditions.push("(o.order_number LIKE ? OR o.name LIKE ? OR o.email LIKE ?)");
+    bindings.push(like, like, like);
+  }
+
+  let sql = `
+    SELECT o.id, o.order_number, o.user_id, o.name, o.email, o.phone, o.address,
+           o.subtotal, o.discount, o.coupon_code, o.gst, o.shipping, o.total,
+           o.status, o.estimated_delivery_date, o.created_at, o.updated_at,
+           (SELECT COUNT(*) FROM order_items WHERE order_id = o.id) AS item_count,
+           (SELECT method FROM payments WHERE order_id = o.id
+            ORDER BY created_at DESC, id DESC LIMIT 1) AS payment_method,
+           (SELECT status FROM payments WHERE order_id = o.id
+            ORDER BY created_at DESC, id DESC LIMIT 1) AS payment_status
+     FROM orders o`;
+  if (conditions.length > 0) {
+    sql += ` WHERE ${conditions.join(" AND ")}`;
+  }
+  sql += `
+     ORDER BY date(o.created_at) DESC,
+              CASE WHEN o.status = 'placed' THEN 0 ELSE 1 END,
+              o.created_at DESC, o.id DESC`;
+
+  const { results } = await c.env.DB
+    .prepare(sql)
+    .bind(...bindings)
+    .all<AdminOrderRow>();
+
+  return c.json(results);
+});
+
+/** The detail of one order. */
+adminRoutes.get("/orders/:id", async (c: AdminContext) => {
+  const id = c.req.param("id");
+  if (!id) {
+    return c.json({ detail: ORDER_NOT_FOUND }, 404);
+  }
+
+  const order = await readOrderDetail(c.env.DB, id);
+  if (!order) {
+    return c.json({ detail: ORDER_NOT_FOUND }, 404);
+  }
+
+  return c.json(order);
+});
+
+/**
+ * Changes an order: the contact and address block, the status, or both.
+ *
+ * The shipping block replaces the whole contact and address block and is
+ * allowed only while the order is placed. The status follows the legal
+ * transitions of the pipeline, and `cancelled` is only allowed from
+ * `placed` or `confirmed`. Every change appends a row to the status history
+ * and sends the status mail of the new status.
+ */
+adminRoutes.patch("/orders/:id", async (c: AdminContext) => {
+  const id = c.req.param("id");
+  if (!id) {
+    return c.json({ detail: ORDER_NOT_FOUND }, 404);
+  }
+
+  const current = await readOrderRow(c.env.DB, id);
+  if (!current) {
+    return c.json({ detail: ORDER_NOT_FOUND }, 404);
+  }
+
+  const body = await readJsonBody(c);
+  if (!body) {
+    return c.json({ detail: INVALID_BODY }, 400);
+  }
+
+  // The contact and address block can only be replaced while the order is placed.
+  let shippingBlock: ShippingBlock | null = null;
+  if (body.shipping !== undefined) {
+    if (current.status !== "placed") {
+      return c.json({ detail: ORDER_NOT_EDITABLE }, 400);
+    }
+    shippingBlock = readShippingBlock(body.shipping);
+    if (!shippingBlock) {
+      return c.json({ detail: SHIPPING_REQUIRED }, 400);
+    }
+  }
+
+  let nextStatus = current.status;
+  let nextEta = current.estimated_delivery_date;
+  let statusChanged = false;
+
+  if (body.status !== undefined && body.status !== null) {
+    const status = readAdminString(body.status);
+    if (!VALID_STATUSES.has(status)) {
+      return c.json({ detail: INVALID_STATUS }, 400);
+    }
+    if (status !== current.status) {
+      if (status === "cancelled") {
+        // Only placed and confirmed orders can be cancelled: once an order
+        // is on its way or delivered, cancelling it is no longer possible.
+        if (current.status !== "placed" && current.status !== "confirmed") {
+          return c.json({ detail: CANNOT_CANCEL_AFTER_SHIPPING }, 400);
+        }
+      } else if (ORDER_NEXT[current.status] !== status) {
+        return c.json(
+          { detail: `Cannot change status from ${current.status} to ${status}` },
+          400,
+        );
+      }
+      nextStatus = status;
+      nextEta =
+        status === "shipped"
+          ? readAdminString(body.estimated_delivery_date) || deliveryEstimate()
+          : current.estimated_delivery_date;
+      statusChanged = true;
+    }
+  }
+
+  const now = new Date().toISOString();
+  const statements: D1PreparedStatement[] = [];
+
+  if (shippingBlock) {
+    statements.push(
+      c.env.DB
+        .prepare(
+          `UPDATE orders SET name = ?, phone = ?, email = ?, address = ?,
+           updated_at = ? WHERE id = ?`,
+        )
+        .bind(
+          shippingBlock.full_name,
+          shippingBlock.phone,
+          shippingBlock.email,
+          JSON.stringify(shippingBlock),
+          now,
+          id,
+        ),
+    );
+  }
+
+  if (statusChanged) {
+    statements.push(
+      c.env.DB
+        .prepare(
+          `UPDATE orders SET status = ?, estimated_delivery_date = ?,
+           updated_at = ? WHERE id = ?`,
+        )
+        .bind(nextStatus, nextEta, now, id),
+    );
+    statements.push(
+      c.env.DB
+        .prepare(
+          "INSERT INTO order_status_history (id, order_id, status, note) VALUES (?, ?, ?, ?)",
+        )
+        .bind(newId("hist"), id, nextStatus, statusNote(nextStatus)),
+    );
+  }
+
+  if (nextStatus === "cancelled") {
+    // Giving the stock of every line of the order back to its product.
+    const stockUpdates = await c.env.DB
+      .prepare(
+        "SELECT product_id, SUM(qty) AS qty FROM order_items WHERE order_id = ? GROUP BY product_id",
+      )
+      .bind(id)
+      .all<{ product_id: string | null; qty: number }>();
+    for (const update of stockUpdates.results) {
+      if (update.product_id) {
+        statements.push(
+          c.env.DB
+            .prepare("UPDATE products SET stock = stock + ? WHERE id = ?")
+            .bind(update.qty, update.product_id),
+        );
+      }
+    }
+    // An unpaid payment becomes cancelled; a paid one keeps its money.
+    statements.push(
+      c.env.DB
+        .prepare(
+          "UPDATE payments SET status = 'cancelled' WHERE order_id = ? AND status = 'on_delivery'",
+        )
+        .bind(id),
+    );
+  }
+
+  if (statements.length > 0) {
+    await c.env.DB.batch(statements);
+  }
+
+  // Every change of status tells the buyer about it. A mail that cannot be
+  // sent never fails the change.
+  if (statusChanged) {
+    try {
+      const orderForEmail = {
+        order_number: current.order_number,
+        name: current.name,
+        email: current.email,
+        subtotal: current.subtotal,
+        discount: current.discount,
+        gst: current.gst,
+        shipping: current.shipping,
+        total: current.total,
+        estimated_delivery_date: nextEta,
+      };
+      await sendMail(
+        c.env,
+        orderStatusEmail(orderForEmail, nextStatus, nextEta ?? undefined),
+        { orderId: id, template: nextStatus },
+      );
+    } catch {
+      // A mail that cannot be sent must not fail the change.
+    }
+  }
+
+  return c.json(await readOrderDetail(c.env.DB, id));
+});
+
+/** The payments of the store, joined with their order numbers, newest first. */
+adminRoutes.get("/payments", async (c: AdminContext) => {
+  const { results } = await c.env.DB
+    .prepare(
+      `SELECT p.id, p.order_id, o.order_number, p.method, p.amount, p.status, p.created_at
+       FROM payments p
+       JOIN orders o ON o.id = p.order_id
+       ORDER BY p.created_at DESC, p.id DESC`,
+    )
+    .all<PaymentWithOrder>();
+
+  return c.json(results);
 });
