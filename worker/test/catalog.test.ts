@@ -70,41 +70,60 @@ function ids(products: ProductJson[]): string[] {
   return products.map((product) => product.id);
 }
 
-beforeAll(async () => {
-  // The proteins are written first and sort last: the order of the response
-  // has to come from `sort_order`, not from the order of the writes.
+/** A category of the fixture. */
+interface CategoryFixture {
+  id: string;
+  slug: string;
+  name: string;
+  imageUrl: string;
+  tagline: string;
+  sortOrder: number;
+}
+
+async function insertCategory(category: CategoryFixture): Promise<void> {
   await db
     .prepare(
       `INSERT INTO categories (id, slug, name, image_url, tagline, sort_order)
        VALUES (?, ?, ?, ?, ?, ?)`,
     )
     .bind(
-      CAT_PROTEINS,
-      "proteins",
-      "Proteins",
-      "/api/images/seed/proteins.jpg",
-      "Whey, isolate & plant protein",
-      2,
+      category.id,
+      category.slug,
+      category.name,
+      category.imageUrl,
+      category.tagline,
+      category.sortOrder,
     )
     .run();
+}
 
-  await db
-    .prepare(
-      `INSERT INTO categories (id, slug, name, image_url, tagline, sort_order)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      CAT_GAINERS,
-      "gainers",
-      "Gainers",
-      "/api/images/seed/gainers.jpg",
-      "Clean calorie-dense mass",
-      1,
-    )
-    .run();
+/** A product of the fixture. */
+interface ProductFixture {
+  id: string;
+  name: string;
+  slug: string;
+  brand: string;
+  categoryId: string;
+  mrp: number;
+  salePrice: number;
+  stock: number;
+  images: string[];
+  flavors: string[];
+  weightOptions: string[];
+  badge: string | null;
+  isNewArrival: number;
+  isActive: number;
+  rating: number;
+  ordersCount: number;
+  createdAt: string;
+  /**
+   * The discount percent stored in the row. The API computes its own, so a
+   * fixture can store a wrong value to prove that.
+   */
+  storedDiscountPercent?: number;
+}
 
-  // The stored `discount_percent` is deliberately wrong (99): the API has to
-  // compute the discount from the prices it serves.
+async function insertProduct(product: ProductFixture): Promise<void> {
   await db
     .prepare(
       `INSERT INTO products
@@ -114,114 +133,132 @@ beforeAll(async () => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
-      PROD_WHEY,
-      "Kinetic Gold 100% Whey Isolate",
-      "kinetic-gold-whey-isolate",
-      "Kinetic",
-      CAT_PROTEINS,
-      399900,
-      299900,
-      99,
-      12,
-      JSON.stringify(["/api/images/whey-1.jpg", "/api/images/whey-2.jpg"]),
-      JSON.stringify(["Rich Chocolate", "Vanilla Bean"]),
-      JSON.stringify(["1 kg", "2 kg"]),
-      "HOT",
-      0,
-      1,
-      4.8,
-      2314,
-      "2026-01-05 10:00:00",
+      product.id,
+      product.name,
+      product.slug,
+      product.brand,
+      product.categoryId,
+      product.mrp,
+      product.salePrice,
+      product.storedDiscountPercent ?? 0,
+      product.stock,
+      JSON.stringify(product.images),
+      JSON.stringify(product.flavors),
+      JSON.stringify(product.weightOptions),
+      product.badge,
+      product.isNewArrival,
+      product.isActive,
+      product.rating,
+      product.ordersCount,
+      product.createdAt,
     )
     .run();
+}
 
-  await db
-    .prepare(
-      `INSERT INTO products
-         (id, name, slug, brand, category_id, mrp, sale_price, stock,
-          images, flavors, weight_options, badge, is_new_arrival, is_active,
-          rating, orders_count, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      PROD_PLANT,
-      "Kinetic Plant Protein Isolate",
-      "kinetic-plant-protein-isolate",
-      "Kinetic",
-      CAT_PROTEINS,
-      299900,
-      249900,
-      3,
-      JSON.stringify([]),
-      JSON.stringify(["Smooth Vanilla", "Dutch Cocoa"]),
-      JSON.stringify(["800 g"]),
-      "NEW",
-      1,
-      1,
-      4.9,
-      1240,
-      "2026-03-05 10:00:00",
-    )
-    .run();
+beforeAll(async () => {
+  // The proteins are written first and sort last: the order of the response
+  // has to come from `sort_order`, not from the order of the writes.
+  await insertCategory({
+    id: CAT_PROTEINS,
+    slug: "proteins",
+    name: "Proteins",
+    imageUrl: "/api/images/seed/proteins.jpg",
+    tagline: "Whey, isolate & plant protein",
+    sortOrder: 2,
+  });
 
-  await db
-    .prepare(
-      `INSERT INTO products
-         (id, name, slug, brand, category_id, mrp, sale_price, stock,
-          images, flavors, weight_options, badge, is_new_arrival, is_active,
-          rating, orders_count, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      PROD_GAINER,
-      "Apex Fuel Serious Mass Gainer",
-      "apex-fuel-serious-mass-gainer",
-      "Apex Fuel",
-      CAT_GAINERS,
-      349900,
-      279900,
-      8,
-      JSON.stringify(["/api/images/gainer-1.jpg"]),
-      JSON.stringify(["Chocolate", "Banana"]),
-      JSON.stringify(["3 kg", "5 kg"]),
-      null,
-      0,
-      1,
-      4.5,
-      3120,
-      "2026-02-05 10:00:00",
-    )
-    .run();
+  await insertCategory({
+    id: CAT_GAINERS,
+    slug: "gainers",
+    name: "Gainers",
+    imageUrl: "/api/images/seed/gainers.jpg",
+    tagline: "Clean calorie-dense mass",
+    sortOrder: 1,
+  });
+
+  // The stored `discount_percent` is deliberately wrong (99): the API has to
+  // compute the discount from the prices it serves.
+  await insertProduct({
+    id: PROD_WHEY,
+    name: "Kinetic Gold 100% Whey Isolate",
+    slug: "kinetic-gold-whey-isolate",
+    brand: "Kinetic",
+    categoryId: CAT_PROTEINS,
+    mrp: 399900,
+    salePrice: 299900,
+    stock: 12,
+    images: ["/api/images/whey-1.jpg", "/api/images/whey-2.jpg"],
+    flavors: ["Rich Chocolate", "Vanilla Bean"],
+    weightOptions: ["1 kg", "2 kg"],
+    badge: "HOT",
+    isNewArrival: 0,
+    isActive: 1,
+    rating: 4.8,
+    ordersCount: 2314,
+    createdAt: "2026-01-05 10:00:00",
+    storedDiscountPercent: 99,
+  });
+
+  await insertProduct({
+    id: PROD_PLANT,
+    name: "Kinetic Plant Protein Isolate",
+    slug: "kinetic-plant-protein-isolate",
+    brand: "Kinetic",
+    categoryId: CAT_PROTEINS,
+    mrp: 299900,
+    salePrice: 249900,
+    stock: 3,
+    images: [],
+    flavors: ["Smooth Vanilla", "Dutch Cocoa"],
+    weightOptions: ["800 g"],
+    badge: "NEW",
+    isNewArrival: 1,
+    isActive: 1,
+    rating: 4.9,
+    ordersCount: 1240,
+    createdAt: "2026-03-05 10:00:00",
+  });
+
+  await insertProduct({
+    id: PROD_GAINER,
+    name: "Apex Fuel Serious Mass Gainer",
+    slug: "apex-fuel-serious-mass-gainer",
+    brand: "Apex Fuel",
+    categoryId: CAT_GAINERS,
+    mrp: 349900,
+    salePrice: 279900,
+    stock: 8,
+    images: ["/api/images/gainer-1.jpg"],
+    flavors: ["Chocolate", "Banana"],
+    weightOptions: ["3 kg", "5 kg"],
+    badge: null,
+    isNewArrival: 0,
+    isActive: 1,
+    rating: 4.5,
+    ordersCount: 3120,
+    createdAt: "2026-02-05 10:00:00",
+  });
 
   // Inactive: it is hidden from the list, the counts and the detail route.
-  await db
-    .prepare(
-      `INSERT INTO products
-         (id, name, slug, brand, category_id, mrp, sale_price, stock,
-          images, flavors, weight_options, badge, is_new_arrival, is_active,
-          rating, orders_count, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      PROD_RETIRED,
-      "SwiftFuel Thermo Burn",
-      "swiftfuel-thermo-burn",
-      "SwiftFuel",
-      CAT_GAINERS,
-      179900,
-      129900,
-      0,
-      JSON.stringify([]),
-      JSON.stringify([]),
-      JSON.stringify(["90 Capsules"]),
-      null,
-      0,
-      0,
-      4.3,
-      1810,
-      "2025-12-05 10:00:00",
-    )
-    .run();
+  await insertProduct({
+    id: PROD_RETIRED,
+    name: "SwiftFuel Thermo Burn",
+    slug: "swiftfuel-thermo-burn",
+    brand: "SwiftFuel",
+    categoryId: CAT_GAINERS,
+    mrp: 179900,
+    salePrice: 129900,
+    stock: 0,
+    images: [],
+    flavors: [],
+    weightOptions: ["90 Capsules"],
+    badge: null,
+    isNewArrival: 0,
+    isActive: 0,
+    rating: 4.3,
+    ordersCount: 1810,
+    createdAt: "2025-12-05 10:00:00",
+  });
 });
 
 describe("catalog routes", () => {
