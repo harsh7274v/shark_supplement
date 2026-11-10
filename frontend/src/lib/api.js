@@ -1,9 +1,7 @@
 import axios from "axios";
 
 const backendUrl =
-  (typeof process !== "undefined" && process.env?.REACT_APP_BACKEND_URL) ||
-  (typeof import.meta !== "undefined" && import.meta.env?.VITE_BACKEND_URL) ||
-  "http://localhost:8000";
+  (typeof process !== "undefined" && process.env?.REACT_APP_BACKEND_URL) || "";
 
 export const API = axios.create({
   baseURL: `${backendUrl}/api`,

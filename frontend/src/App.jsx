@@ -1,12 +1,19 @@
-import { Component, useEffect } from "react";
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { Component, useEffect, Suspense, lazy } from "react";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { Toaster } from "sonner";
 import Lenis from "lenis";
 import "@/App.css";
 import { AuthProvider } from "./context/AuthContext";
 import { CartProvider } from "./context/CartContext";
+import { useAuth } from "./context/AuthContext";
 import Home from "./pages/Home";
 import AuthCallback from "./pages/AuthCallback";
+
+const AdminLayout = lazy(() => import("./pages/admin/AdminLayout"));
+
+function MyOrders() {
+  return <div className="min-h-screen bg-white py-12 px-6 text-center"><h2 className="font-display font-bold text-2xl text-slate-900">My Orders</h2><p className="text-slate-500 mt-2">Your order history will appear here.</p></div>;
+}
 
 class ErrorBoundary extends Component {
   state = { error: null };
@@ -51,11 +58,24 @@ function SmoothScroll() {
 }
 
 function AppRouter() {
-  const location = useLocation();
-  if (location.hash?.includes("session_id=")) return <AuthCallback />;
+  const { user } = useAuth();
   return (
     <Routes>
       <Route path="/" element={<Home />} />
+      <Route path="/auth/callback" element={<AuthCallback />} />
+      <Route path="/my-orders" element={<MyOrders />} />
+      <Route
+        path="/admin/*"
+        element={
+          user !== null && user !== false && user.role === "admin" ? (
+            <Suspense fallback={null}>
+              <AdminLayout />
+            </Suspense>
+          ) : (
+            <Navigate to="/" replace />
+          )
+        }
+      />
     </Routes>
   );
 }

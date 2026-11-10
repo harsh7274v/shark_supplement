@@ -19,6 +19,7 @@ export default defineConfig(({ mode }) => {
     },
     define: {
       'process.env.REACT_APP_BACKEND_URL': JSON.stringify(backendUrl),
+      'process.env.REACT_APP_GOOGLE_ENABLED': JSON.stringify(env.REACT_APP_GOOGLE_ENABLED ?? 'false'),
     },
   };
 });

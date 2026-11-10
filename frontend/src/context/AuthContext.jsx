@@ -38,8 +38,9 @@ export function AuthProvider({ children }) {
   };
 
   const googleLogin = () => {
-    const redirectUrl = window.location.origin + "/auth/callback";
-    window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
+    const backendUrl =
+      (typeof process !== "undefined" && process.env?.REACT_APP_BACKEND_URL) || "";
+    window.location.href = `${backendUrl}/api/auth/google/start`;
   };
 
   return (

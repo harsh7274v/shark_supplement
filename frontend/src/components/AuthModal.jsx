@@ -110,13 +110,15 @@ export default function AuthModal() {
               ))}
             </div>
 
-            <button
-              data-testid="auth-modal-google-btn"
-              onClick={googleLogin}
-              className="w-full flex items-center justify-center gap-3 py-3.5 rounded-2xl border-2 border-slate-200 font-extrabold text-sm text-slate-800 hover:border-slate-400 transition-colors"
-            >
-              <GoogleG /> Continue with Google
-            </button>
+            {process.env.REACT_APP_GOOGLE_ENABLED === "true" && (
+              <button
+                data-testid="auth-modal-google-btn"
+                onClick={googleLogin}
+                className="w-full flex items-center justify-center gap-3 py-3.5 rounded-2xl border-2 border-slate-200 font-extrabold text-sm text-slate-800 hover:border-slate-400 transition-colors"
+              >
+                <GoogleG /> Continue with Google
+              </button>
+            )}
             <div className="flex items-center gap-3 my-5">
               <span className="flex-1 h-px bg-slate-100" />
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">or with email</span>
