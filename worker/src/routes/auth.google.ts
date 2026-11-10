@@ -27,6 +27,8 @@ import {
   randomHex,
 } from "../lib/auth-common";
 import { ACCESS_TOKEN_TTL, REFRESH_TOKEN_TTL, signAccessToken, signRefreshToken } from "../lib/jwt";
+import type { UserRow } from "../lib/users";
+import { findUserByEmail } from "../lib/users";
 
 type GoogleEnv = { Bindings: Env };
 type GoogleContext = Context<GoogleEnv>;
@@ -61,15 +63,6 @@ interface GoogleClaims {
   email_verified?: unknown;
   name?: unknown;
   picture?: unknown;
-}
-
-/** A row of the `users` table. */
-interface UserRow {
-  id: string;
-  email: string;
-  name: string | null;
-  picture: string | null;
-  role: string;
 }
 
 /** The customer the sign-in belongs to. */
@@ -165,14 +158,6 @@ async function upsertGoogleUser(
   };
 }
 
-/** Reads the customer of an email. */
-async function findUserByEmail(db: D1Database, email: string): Promise<UserRow | null> {
-  return db
-    .prepare("SELECT id, email, name, picture, role FROM users WHERE email = ?")
-    .bind(email)
-    .first<UserRow>();
-}
-
 /** Refreshes the profile of a customer that signs in again. */
 async function updateGoogleUser(
   db: D1Database,
@@ -249,14 +234,13 @@ googleAuthRoutes.get("/callback", async (c) => {
     return c.json({ detail: NOT_CONFIGURED }, 501);
   }
 
-  // A sign-in that came through our own start endpoint carries the state
-  // cookie; the state of the answer has to match it.
+  // The state ties the answer of Google to the sign-in that started here, so
+  // the cookie of our own start endpoint is required: without it the answer
+  // cannot belong to a sign-in of this browser.
   const expectedState = getCookie(c, STATE_COOKIE);
-  if (expectedState) {
-    const receivedState = c.req.query("state");
-    if (!receivedState || receivedState !== expectedState) {
-      return c.json({ detail: INVALID_STATE }, 400);
-    }
+  const receivedState = c.req.query("state");
+  if (!expectedState || !receivedState || receivedState !== expectedState) {
+    return c.json({ detail: INVALID_STATE }, 400);
   }
 
   if (c.req.query("error")) {

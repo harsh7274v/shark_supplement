@@ -31,6 +31,8 @@ import {
   verifyToken,
 } from "../lib/jwt";
 import { hashPassword, verifyPassword } from "../lib/passwords";
+import type { UserRow } from "../lib/users";
+import { findUserByEmail } from "../lib/users";
 import { getOptionalUser, requireAuth } from "../middleware/auth";
 import { googleAuthRoutes } from "./auth.google";
 
@@ -58,17 +60,6 @@ const PASSWORD_MAX = 100;
 const LOCKED_MESSAGE = "Too many failed attempts. Try again in 15 minutes";
 const INVALID_CREDENTIALS = "Invalid email or password";
 const NOT_AUTHENTICATED = "Not authenticated";
-
-/** A row of the `users` table. */
-interface UserRow {
-  id: string;
-  email: string;
-  name: string | null;
-  picture: string | null;
-  role: string;
-  auth_provider: string | null;
-  password_hash?: string | null;
-}
 
 /** The user JSON the API answers with; it never carries the password hash. */
 function publicUser(row: UserRow) {
@@ -121,15 +112,6 @@ function parseTimestamp(value: string | null): number | null {
  */
 function loginIdentifier(c: AuthContext, email: string): string {
   return `${c.req.header("CF-Connecting-IP") ?? "unknown"}:${email}`;
-}
-
-async function findUserByEmail(db: D1Database, email: string): Promise<UserRow | null> {
-  return db
-    .prepare(
-      "SELECT id, email, name, picture, role, auth_provider, password_hash FROM users WHERE email = ?",
-    )
-    .bind(email)
-    .first<UserRow>();
 }
 
 async function findUserById(db: D1Database, id: string): Promise<UserRow | null> {

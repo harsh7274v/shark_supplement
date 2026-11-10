@@ -9,6 +9,7 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
 import type { Env } from "../env";
+import { ACCESS_TOKEN_COOKIE } from "../lib/auth-common";
 import { verifyToken } from "../lib/jwt";
 
 /** The identity of the caller, taken from the verified access token. */
@@ -22,7 +23,6 @@ export interface UserPublic {
 type AuthEnv = { Bindings: Env };
 type AuthContext = Context<AuthEnv>;
 
-const ACCESS_TOKEN_COOKIE = "access_token";
 const BEARER_PREFIX = "Bearer ";
 
 function readAccessToken(c: AuthContext): string | undefined {

@@ -359,6 +359,17 @@ describe("google sign-in", () => {
       expect(await res.json()).toEqual({ detail: "Invalid OAuth state" });
     });
 
+    it("rejects a callback without the state cookie", async () => {
+      const res = await app.request(
+        `${ORIGIN}/api/auth/google/callback?code=google-code&state=a-state-without-a-cookie`,
+        {},
+        googleEnv(),
+      );
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ detail: "Invalid OAuth state" });
+    });
+
     it("answers 400 without a code", async () => {
       const { state, stateCookie } = await startSignIn();
       const res = await completeSignIn({ code: "", state, stateCookie });
