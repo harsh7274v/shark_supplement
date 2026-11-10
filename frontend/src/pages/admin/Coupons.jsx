@@ -58,11 +58,11 @@ export default function Coupons() {
       next.discount_type = "Discount type must be percent or flat";
     }
     const value = Number(form.discount_value);
-    if (!Number.isFinite(value) || value < 0) {
+    if (!Number.isFinite(value) || value < 0 || !Number.isInteger(value)) {
       next.discount_value = "Discount value must be a whole number ≥ 0";
     }
     const minOrder = Number(form.min_order);
-    if (!Number.isFinite(minOrder) || minOrder < 0) {
+    if (!Number.isFinite(minOrder) || minOrder < 0 || !Number.isInteger(minOrder)) {
       next.min_order = "Min order must be a whole number ≥ 0";
     }
     setErrors(next);
@@ -76,11 +76,16 @@ export default function Coupons() {
     }
     setSaving(true);
     try {
+      const value = Number(form.discount_value);
+      const minOrder = Number(form.min_order);
       const payload = {
         code: form.code.trim(),
         discount_type: form.discount_type,
-        discount_value: Number(form.discount_value),
-        min_order: Number(form.min_order),
+        // The API stores paise integers. Flat ₹ values are rupees in the form,
+        // so convert to paise; percent stays raw (percentage points).
+        discount_value:
+          form.discount_type === "flat" ? Math.round(value * 100) : Math.round(value),
+        min_order: Math.round(minOrder * 100),
         active: form.active === "1" ? 1 : 0,
       };
       if (editing) {
@@ -244,8 +249,8 @@ export default function Coupons() {
                                 setForm({
                                   code: coupon.code,
                                   discount_type: coupon.discount_type,
-                                  discount_value: String(coupon.discount_value),
-                                  min_order: String(coupon.min_order),
+                                  discount_value: String(coupon.discount_value / 100),
+                                  min_order: String(coupon.min_order / 100),
                                   active: String(coupon.active),
                                 });
                                 setErrors({});

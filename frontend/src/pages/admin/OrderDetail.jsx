@@ -21,6 +21,14 @@ const STATUS_COLORS = {
   cancelled: "bg-red-50 text-red-800 border-red-100",
 };
 
+/** Default delivery estimate: +5 days from now. Hoisted off the render path. */
+const defaultEta = new Date(Date.now() + 5 * 86_400_000)
+  .toISOString()
+  .slice(0, 10);
+
+/** Parses a stored date string (allows a space separator) into a Date. */
+const parseDate = (value) => new Date(String(value).replace(" ", "T"));
+
 export default function OrderDetail({ orderId, onClose }) {
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -35,10 +43,6 @@ export default function OrderDetail({ orderId, onClose }) {
     city: "",
     pincode: "",
   });
-
-  const defaultEta = new Date(Date.now() + 5 * 86_400_000)
-    .toISOString()
-    .slice(0, 10);
 
   const fetchOrder = useCallback(async () => {
     setLoading(true);
@@ -61,7 +65,7 @@ export default function OrderDetail({ orderId, onClose }) {
     } finally {
       setLoading(false);
     }
-  }, [orderId, defaultEta]);
+  }, [orderId]);
 
   useEffect(() => {
     fetchOrder();
@@ -108,21 +112,19 @@ export default function OrderDetail({ orderId, onClose }) {
     patch({ status: "cancelled" });
   };
 
-  const handleAddressSave = (event) => {
+  const handleAddressSave = async (event) => {
     event.preventDefault();
     if (!canEditAddress) return;
     setSaving(true);
-    API.patch(`/admin/orders/${orderId}`, { shipping: addressForm })
-      .then(() => {
-        toast.success("Address saved");
-        fetchOrder();
-      })
-      .catch((error) => {
-        toast.error(formatApiError(error) || "Failed to save address");
-      })
-      .finally(() => {
-        setSaving(false);
-      });
+    try {
+      await API.patch(`/admin/orders/${orderId}`, { shipping: addressForm });
+      toast.success("Address saved");
+      await fetchOrder();
+    } catch (error) {
+      toast.error(formatApiError(error) || "Failed to save address");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const setAddressField = (key, value) => {
@@ -348,7 +350,7 @@ export default function OrderDetail({ orderId, onClose }) {
                       Items
                     </p>
                     <span className="text-xs font-bold text-slate-400" data-testid="admin-order-items-count">
-                      {order.items.length} item{order.items.length !== 1 ? "s" : ""}
+                      {(order.items ?? []).length} item{(order.items ?? []).length !== 1 ? "s" : ""}
                     </span>
                   </div>
                   <div className="rounded-xl border border-slate-100 overflow-hidden">
@@ -363,7 +365,7 @@ export default function OrderDetail({ orderId, onClose }) {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {order.items.map((item) => (
+                        {(order.items ?? []).map((item) => (
                           <tr key={item.id} className="text-slate-600">
                             <td className="p-3" data-testid={`admin-order-item-name-${item.id}`}>
                               {item.name}
@@ -418,7 +420,7 @@ export default function OrderDetail({ orderId, onClose }) {
                     </div>
                     {order.payment && (
                       <p className="text-[10px] text-slate-400 mt-1" data-testid="admin-order-payment-date">
-                        {new Date(order.payment.created_at.replace(" ", "T")).toLocaleDateString(
+                        {parseDate(order.payment.created_at).toLocaleDateString(
                           "en-IN",
                         )}
                       </p>
@@ -520,7 +522,7 @@ export default function OrderDetail({ orderId, onClose }) {
                   {order.estimated_delivery_date && (
                     <p className="text-[10px] text-slate-400 mt-3" data-testid="admin-order-eta">
                       Expected delivery:{" "}
-                      {new Date(order.estimated_delivery_date.replace(" ", "T")).toLocaleDateString(
+                      {parseDate(order.estimated_delivery_date).toLocaleDateString(
                         "en-IN",
                       )}
                     </p>
@@ -544,7 +546,7 @@ export default function OrderDetail({ orderId, onClose }) {
                     </button>
                   </div>
                   <div className="space-y-3">
-                    {order.status_history.map((entry) => (
+                    {(order.status_history ?? []).map((entry) => (
                       <div
                         key={entry.id}
                         className="flex items-start gap-3"
@@ -557,14 +559,12 @@ export default function OrderDetail({ orderId, onClose }) {
                             {entry.note && ` — ${entry.note}`}
                           </p>
                           <p className="text-[10px] text-slate-400" data-testid={`admin-order-history-date-${entry.id}`}>
-                            {new Date(entry.created_at.replace(" ", "T")).toLocaleString(
-                              "en-IN",
-                            )}
+                            {parseDate(entry.created_at).toLocaleString("en-IN")}
                           </p>
                         </div>
                       </div>
                     ))}
-                    {order.status_history.length === 0 && (
+                    {(order.status_history ?? []).length === 0 && (
                       <p className="text-xs text-slate-400" data-testid="admin-order-history-empty">
                         No status changes yet.
                       </p>
@@ -593,7 +593,7 @@ export default function OrderDetail({ orderId, onClose }) {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {order.email_log.map((entry) => (
+                        {(order.email_log ?? []).map((entry) => (
                           <tr key={entry.id} className="text-slate-600">
                             <td className="p-3" data-testid={`admin-order-email-to-${entry.id}`}>
                               {entry.to_email}
@@ -620,13 +620,11 @@ export default function OrderDetail({ orderId, onClose }) {
                               )}
                             </td>
                             <td className="p-3 text-slate-500" data-testid={`admin-order-email-date-${entry.id}`}>
-                              {new Date(entry.created_at.replace(" ", "T")).toLocaleString(
-                                "en-IN",
-                              )}
+                              {parseDate(entry.created_at).toLocaleString("en-IN")}
                             </td>
                           </tr>
                         ))}
-                        {order.email_log.length === 0 && (
+                        {(order.email_log ?? []).length === 0 && (
                           <tr>
                             <td colSpan={4} className="p-3 text-center text-slate-400 text-xs" data-testid="admin-order-email-empty">
                               No emails sent for this order yet.

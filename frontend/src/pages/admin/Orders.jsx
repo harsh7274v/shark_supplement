@@ -31,13 +31,20 @@ export default function Orders() {
   const [refreshing, setRefreshing] = useState(false);
   const [statusFilter, setStatusFilter] = useState("");
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
+  // Debounce the search so the list isn't refetched on every keystroke.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
     setRefreshing(true);
     try {
       const { data } = await API.get("/admin/orders", {
-        params: { status: statusFilter || undefined, q: search || undefined },
+        params: { status: statusFilter || undefined, q: debouncedSearch || undefined },
       });
       setItems(Array.isArray(data) ? data : []);
     } catch (error) {
@@ -46,7 +53,7 @@ export default function Orders() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [statusFilter, search]);
+  }, [statusFilter, debouncedSearch]);
 
   useEffect(() => {
     fetchOrders();
@@ -76,7 +83,7 @@ export default function Orders() {
             Orders
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            All store orders, newest day first · placed orders are highlighted and listed first
+            All store orders, newest day first · placed orders are highlighted
           </p>
         </div>
         <div className="flex flex-col sm:flex-row sm:items-center gap-3">

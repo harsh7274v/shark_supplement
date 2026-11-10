@@ -39,8 +39,6 @@ export default function Payments() {
     fetchPayments();
   }, [fetchPayments]);
 
-  const total = items.reduce((sum, payment) => sum + (payment.amount ?? 0), 0);
-
   const filtered = items.filter((payment) => {
     const query = search.toLowerCase();
     if (!query) return true;
@@ -54,6 +52,8 @@ export default function Payments() {
       .toLowerCase();
     return haystack.includes(query);
   });
+
+  const total = filtered.reduce((sum, payment) => sum + (payment.amount ?? 0), 0);
 
   return (
     <div className="space-y-6">
