@@ -18,6 +18,27 @@ const PROD_WHEY = "prod_orders_whey";
 const PROD_PLANT = "prod_orders_plant";
 /** A product with a single unit in stock. */
 const PROD_LAST = "prod_orders_last";
+/**
+ * The three products of the race test: the first one wins its stock, the
+ * other two lose it to another order.
+ */
+const PROD_RACE_WON = "prod_orders_race_won";
+const PROD_RACE_LOST_A = "prod_orders_race_lost_a";
+const PROD_RACE_LOST_B = "prod_orders_race_lost_b";
+/** A product of the carts of many lines; nothing else uses it. */
+const PROD_BULK = "prod_orders_bulk";
+
+/** The stock every product of the race test has. */
+const RACE_STOCK = 10;
+
+/** The stock the product of the big carts has. */
+const BULK_STOCK = 200;
+
+/** The most lines a cart may have. */
+const MAX_CART_ITEMS = 50;
+
+/** The orders that go into the database in one batch. */
+const BULK_BATCH = 50;
 
 /** The sale price of the two products of the brief. */
 const SALE_PRICE = 299_900;
@@ -214,6 +235,81 @@ async function readProduct(id: string): Promise<{ stock: number; orders_count: n
     .first<{ stock: number; orders_count: number }>();
 }
 
+/**
+ * Inserts `count` orders of a buyer, with a line and a history row each.
+ *
+ * The orders go straight into the database: the test is about the list of the
+ * buyer, and a hundred and one requests would be slow.
+ */
+async function insertOrders(userId: string, count: number): Promise<void> {
+  for (let offset = 0; offset < count; offset += BULK_BATCH) {
+    const size = Math.min(BULK_BATCH, count - offset);
+    const statements: D1PreparedStatement[] = [];
+
+    for (let index = offset; index < offset + size; index++) {
+      const orderId = `ord_bulk_${index}_${userId}`;
+      const created = new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString();
+
+      statements.push(
+        db
+          .prepare(
+            `INSERT INTO orders (id, order_number, user_id, name, email, phone, address,
+               subtotal, discount, coupon_code, gst, shipping, total, status,
+               estimated_delivery_date, created_at, updated_at)
+             VALUES (?, ?, ?, 'Bulk Buyer', 'bulk@example.com', '9876543210', '{}',
+               ?, 0, NULL, 0, 0, ?, 'placed', NULL, ?, ?)`,
+          )
+          .bind(orderId, `KN-BULK-${index}-${userId}`, userId, SALE_PRICE, SALE_PRICE, created, created),
+        db
+          .prepare(
+            `INSERT INTO order_items (id, order_id, product_id, name, unit_price, qty, flavor, weight)
+             VALUES (?, ?, ?, 'Bulk line', ?, 1, NULL, NULL)`,
+          )
+          .bind(`item_bulk_${index}_${userId}`, orderId, PROD_WHEY, SALE_PRICE),
+        db
+          .prepare(
+            `INSERT INTO order_status_history (id, order_id, status, note, created_at)
+             VALUES (?, ?, 'placed', 'Order placed', ?)`,
+          )
+          .bind(`hist_bulk_${index}_${userId}`, orderId, created),
+      );
+    }
+
+    await db.batch(statements);
+  }
+}
+
+/**
+ * Makes the stock of some products impossible to take, the way another order
+ * that took the stock in the meantime does.
+ *
+ * The trigger is a `BEFORE UPDATE` that ignores the update, so the guarded
+ * update changes no row and the order route undoes the order. It only fires
+ * on an update that takes stock, so the undo, which gives the stock back,
+ * still goes through.
+ */
+async function blockStockUpdate(productIds: string[]): Promise<void> {
+  for (const id of productIds) {
+    expect(id).toMatch(/^[a-z0-9_]+$/);
+  }
+
+  const list = productIds.map((id) => `'${id}'`).join(", ");
+  await db
+    .prepare(
+      `CREATE TRIGGER trg_orders_race BEFORE UPDATE ON products
+       WHEN NEW.id IN (${list}) AND NEW.stock < OLD.stock
+       BEGIN
+         SELECT RAISE(IGNORE);
+       END`,
+    )
+    .run();
+}
+
+/** Takes the trigger of the race away again. */
+async function unblockStockUpdate(): Promise<void> {
+  await db.prepare("DROP TRIGGER IF EXISTS trg_orders_race").run();
+}
+
 /** The order as the buyer list serves it. */
 interface OrderJson {
   id: string;
@@ -268,6 +364,40 @@ beforeAll(async () => {
     slug: "pureforge-creatine-monohydrate",
     salePrice: 99_900,
     stock: 1,
+  });
+
+  // The three products of the race test.
+  await insertProduct({
+    id: PROD_RACE_WON,
+    name: "Race Winner Whey",
+    slug: "race-winner-whey",
+    salePrice: 1_000,
+    stock: RACE_STOCK,
+  });
+
+  await insertProduct({
+    id: PROD_RACE_LOST_A,
+    name: "Race Loser Whey A",
+    slug: "race-loser-whey-a",
+    salePrice: 1_000,
+    stock: RACE_STOCK,
+  });
+
+  await insertProduct({
+    id: PROD_RACE_LOST_B,
+    name: "Race Loser Whey B",
+    slug: "race-loser-whey-b",
+    salePrice: 1_000,
+    stock: RACE_STOCK,
+  });
+
+  // The product of the carts of many lines.
+  await insertProduct({
+    id: PROD_BULK,
+    name: "Bulk Cart Whey",
+    slug: "bulk-cart-whey",
+    salePrice: 1_000,
+    stock: BULK_STOCK,
   });
 
   // A percent coupon with a minimum order of Rs 1000 (100000 paise).
@@ -689,6 +819,134 @@ describe("order routes", () => {
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({ detail: "Invalid payment method" });
     });
+
+    it("rejects a cart with more lines than the cart may have", async () => {
+      const items = Array.from({ length: MAX_CART_ITEMS + 1 }, () => ({
+        product_id: PROD_BULK,
+        qty: 1,
+        flavor: null,
+        weight: null,
+      }));
+
+      const res = await post("/api/orders", cart({ items }));
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({
+        detail: `Cart cannot have more than ${MAX_CART_ITEMS} items`,
+      });
+    });
+
+    it("rejects a cart with more different products than D1 can bind", async () => {
+      // More than a hundred different products would need more than the
+      // hundred parameters D1 binds in a query.
+      const items = Array.from({ length: 101 }, (_, index) => ({
+        product_id: `prod_orders_many_${index}`,
+        qty: 1,
+        flavor: null,
+        weight: null,
+      }));
+
+      const res = await post("/api/orders", cart({ items }));
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({
+        detail: `Cart cannot have more than ${MAX_CART_ITEMS} items`,
+      });
+    });
+
+    it("takes a cart of the biggest size it may have", async () => {
+      const items = Array.from({ length: MAX_CART_ITEMS }, () => ({
+        product_id: PROD_BULK,
+        qty: 1,
+        flavor: "Rich Chocolate",
+        weight: "1 kg",
+      }));
+
+      const res = await post("/api/orders", cart({ items, coupon_code: null }));
+
+      expect(res.status).toBe(201);
+    });
+
+    it("gives the stock back to the product that won the race", async () => {
+      // One product loses its stock to another order; the other one keeps
+      // its stock and has to get it back.
+      await blockStockUpdate([PROD_RACE_LOST_A]);
+
+      try {
+        const res = await post(
+          "/api/orders",
+          cart({
+            items: [
+              { product_id: PROD_RACE_WON, qty: 1, flavor: null, weight: null },
+              { product_id: PROD_RACE_LOST_A, qty: 1, flavor: null, weight: null },
+            ],
+            coupon_code: null,
+          }),
+        );
+
+        expect(res.status).toBe(400);
+        expect(await res.json()).toEqual({ detail: "Insufficient stock" });
+
+        const won = await readProduct(PROD_RACE_WON);
+        expect(won?.stock).toBe(RACE_STOCK);
+        expect(won?.orders_count).toBe(0);
+
+        const lost = await readProduct(PROD_RACE_LOST_A);
+        expect(lost?.stock).toBe(RACE_STOCK);
+        expect(lost?.orders_count).toBe(0);
+      } finally {
+        await unblockStockUpdate();
+      }
+    });
+
+    it("gives the stock back only to the products that lost the race", async () => {
+      // The first product wins its stock, the other two lose it to another
+      // order that took the stock in the meantime.
+      await blockStockUpdate([PROD_RACE_LOST_A, PROD_RACE_LOST_B]);
+      const before = await db.prepare("SELECT COUNT(*) AS total FROM orders").first<{
+        total: number;
+      }>();
+
+      try {
+        const res = await post(
+          "/api/orders",
+          cart({
+            items: [
+              { product_id: PROD_RACE_WON, qty: 1, flavor: null, weight: null },
+              { product_id: PROD_RACE_LOST_A, qty: 1, flavor: null, weight: null },
+              { product_id: PROD_RACE_LOST_B, qty: 1, flavor: null, weight: null },
+            ],
+            coupon_code: null,
+          }),
+        );
+
+        expect(res.status).toBe(400);
+        expect(await res.json()).toEqual({ detail: "Insufficient stock" });
+
+        // The product that won its stock gets it back.
+        const won = await readProduct(PROD_RACE_WON);
+        expect(won?.stock).toBe(RACE_STOCK);
+        expect(won?.orders_count).toBe(0);
+
+        // The products that lost the race never took their stock, so they
+        // must not get any back either.
+        const lostA = await readProduct(PROD_RACE_LOST_A);
+        expect(lostA?.stock).toBe(RACE_STOCK);
+        expect(lostA?.orders_count).toBe(0);
+
+        const lostB = await readProduct(PROD_RACE_LOST_B);
+        expect(lostB?.stock).toBe(RACE_STOCK);
+        expect(lostB?.orders_count).toBe(0);
+
+        // The order is gone; the undo takes it away.
+        const after = await db.prepare("SELECT COUNT(*) AS total FROM orders").first<{
+          total: number;
+        }>();
+        expect(after?.total).toBe(before?.total);
+      } finally {
+        await unblockStockUpdate();
+      }
+    });
   });
 
   describe("GET /api/orders", () => {
@@ -771,6 +1029,19 @@ describe("order routes", () => {
 
       expect(res.status).toBe(401);
       expect(await res.json()).toEqual({ detail: "Not authenticated" });
+    });
+
+    it("lists a buyer with more than a hundred orders", async () => {
+      const { cookie, userId } = await signIn(uniqueEmail());
+      await insertOrders(userId, 101);
+
+      const res = await get("/api/orders", { Cookie: cookie });
+
+      expect(res.status).toBe(200);
+      const orders = (await res.json()) as OrderJson[];
+      expect(orders).toHaveLength(101);
+      expect(orders.every((order) => order.items.length === 1)).toBe(true);
+      expect(orders.every((order) => order.status_history.length === 1)).toBe(true);
     });
   });
 

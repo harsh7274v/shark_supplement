@@ -31,6 +31,23 @@ const MIN_QTY = 1;
 /** The biggest quantity a line of an order can have. */
 const MAX_QTY = 20;
 
+/**
+ * The most lines a cart may have.
+ *
+ * The products of a cart are read in one query with a parameter for every
+ * different product, and D1 binds at most a hundred parameters in a query, so
+ * a cart of too many lines would break the query.
+ */
+const MAX_CART_ITEMS = 50;
+
+/**
+ * The most order ids one query of the buyer's list binds.
+ *
+ * D1 binds at most a hundred parameters in a query, so the ids of a buyer
+ * with many orders go in chunks.
+ */
+const ID_CHUNK_SIZE = 50;
+
 /** The number of the first order: `KN-` and 1000 plus the orders there are. */
 const FIRST_ORDER_NUMBER = 1001;
 
@@ -39,6 +56,7 @@ const DELIVERY_DAYS = 5;
 
 const INVALID_BODY = "Invalid request body";
 const EMPTY_CART = "Cart is empty";
+const CART_TOO_LARGE = `Cart cannot have more than ${MAX_CART_ITEMS} items`;
 const INVALID_QUANTITY = `Quantity must be between ${MIN_QTY} and ${MAX_QTY}`;
 const INVALID_PAYMENT_METHOD = "Invalid payment method";
 const SHIPPING_REQUIRED = "Shipping details are required";
@@ -130,6 +148,15 @@ function newId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
 }
 
+/** Splits a list into chunks of at most `size` items. */
+function chunks<T>(items: T[], size: number): T[][] {
+  const parts: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    parts.push(items.slice(index, index + size));
+  }
+  return parts;
+}
+
 /** The date an order is expected to be delivered, a few days out. */
 function estimatedDeliveryDate(): string {
   return new Date(Date.now() + DELIVERY_DAYS * 86_400_000).toISOString().slice(0, 10);
@@ -205,26 +232,38 @@ async function listOrders(db: D1Database, userId: string) {
   }
 
   const ids = orderRows.map((order) => order.id);
-  const placeholders = ids.map(() => "?").join(", ");
+  const itemRows: OrderItemRow[] = [];
+  const historyRows: HistoryRow[] = [];
 
-  const [{ results: itemRows }, { results: historyRows }] = await Promise.all([
-    db
-      .prepare(
-        `SELECT id, order_id, product_id, name, unit_price, qty, flavor, weight
-         FROM order_items WHERE order_id IN (${placeholders})
-         ORDER BY id ASC`,
-      )
-      .bind(...ids)
-      .all<OrderItemRow>(),
-    db
-      .prepare(
-        `SELECT id, order_id, status, note, created_at
-         FROM order_status_history WHERE order_id IN (${placeholders})
-         ORDER BY created_at ASC, id ASC`,
-      )
-      .bind(...ids)
-      .all<HistoryRow>(),
-  ]);
+  // D1 binds at most a hundred parameters in a query, so the ids go in
+  // chunks. Every order is in one chunk, so the lines and the history of an
+  // order stay together. The chunks go one after the other, so a buyer with
+  // many orders does not open a pile of queries at once.
+  for (const chunk of chunks(ids, ID_CHUNK_SIZE)) {
+    const placeholders = chunk.map(() => "?").join(", ");
+
+    const [items, history] = await Promise.all([
+      db
+        .prepare(
+          `SELECT id, order_id, product_id, name, unit_price, qty, flavor, weight
+           FROM order_items WHERE order_id IN (${placeholders})
+           ORDER BY id ASC`,
+        )
+        .bind(...chunk)
+        .all<OrderItemRow>(),
+      db
+        .prepare(
+          `SELECT id, order_id, status, note, created_at
+           FROM order_status_history WHERE order_id IN (${placeholders})
+           ORDER BY created_at ASC, id ASC`,
+        )
+        .bind(...chunk)
+        .all<HistoryRow>(),
+    ]);
+
+    itemRows.push(...items.results);
+    historyRows.push(...history.results);
+  }
 
   const itemsByOrder = new Map<string, OrderItemRow[]>();
   for (const item of itemRows) {
@@ -275,15 +314,19 @@ async function listOrders(db: D1Database, userId: string) {
 /**
  * Undoes an order whose stock was taken by another order in the meantime:
  * the order goes, and the stock of the products that were taken comes back.
+ *
+ * The products that failed to take their stock never had any taken, so they
+ * are left alone; giving their stock back would inflate it.
  */
 async function undoOrder(
   db: D1Database,
   orderId: string,
   stockUpdates: [string, number][],
-  failed: string,
+  failedIds: string[],
 ): Promise<void> {
+  const failed = new Set(failedIds);
   const restore = stockUpdates
-    .filter(([productId]) => productId !== failed)
+    .filter(([productId]) => !failed.has(productId))
     .map(([productId, qty]) =>
       db
         .prepare(
@@ -331,6 +374,12 @@ ordersRoutes.post("/orders", async (c: OrdersContext) => {
   const rawItems = body.items;
   if (!Array.isArray(rawItems) || rawItems.length === 0) {
     return c.json({ detail: EMPTY_CART }, 400);
+  }
+
+  // A cart of many lines has many products, and the products are read in one
+  // query with a parameter for every one of them.
+  if (rawItems.length > MAX_CART_ITEMS) {
+    return c.json({ detail: CART_TOO_LARGE }, 400);
   }
 
   const items: CartItem[] = [];
@@ -505,10 +554,13 @@ ordersRoutes.post("/orders", async (c: OrdersContext) => {
   const results = await c.env.DB.batch(statements);
 
   // The stock of a product can be taken by another order between the check
-  // and the write. When that happens the order is undone.
-  const failed = stockUpdates.find((_, index) => (results[index]?.meta?.changes ?? 0) !== 1);
-  if (failed) {
-    await undoOrder(c.env.DB, orderId, stockUpdates, failed[0]);
+  // and the write. When that happens the order is undone. Every product that
+  // lost the race is remembered, so the undo leaves their stock alone.
+  const failedIds = stockUpdates
+    .filter((_, index) => (results[index]?.meta?.changes ?? 0) !== 1)
+    .map(([productId]) => productId);
+  if (failedIds.length > 0) {
+    await undoOrder(c.env.DB, orderId, stockUpdates, failedIds);
     return c.json({ detail: INSUFFICIENT_STOCK }, 400);
   }
 
