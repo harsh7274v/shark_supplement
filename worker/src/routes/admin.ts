@@ -1424,6 +1424,54 @@ adminRoutes.post("/demo-data/reset", async (c: AdminContext) => {
   return c.json({ ok: true });
 });
 
+/**
+ * Splits seed SQL into statements and runs them one by one.
+ *
+ * Full-line comments (`-- ...`) are stripped first, so a comment block never
+ * reaches D1 as a statement. Every statement of the seed files uses
+ * `INSERT OR IGNORE`, so running the seed twice changes nothing.
+ */
+async function runSeedSql(c: AdminContext, sql: string): Promise<void> {
+  const statements = sql
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("--"))
+    .join("\n")
+    .split(";")
+    .map((statement) => statement.trim())
+    .filter((statement) => statement.length > 0);
+
+  for (const statement of statements) {
+    await c.env.DB.prepare(statement).run();
+  }
+}
+
+/** (Re)seeds the catalog and the demo data: reset first, then both seed
+ * files. Idempotent and deterministic. Behind `requireAdmin` like every
+ * other admin route: 401 without a token, 403 for a customer. */
+adminRoutes.post("/demo-data/seed", async (c: AdminContext) => {
+  const seedCatalog = c.env.SEED_CATALOG;
+  const seedDemoOrders = c.env.SEED_DEMO_ORDERS;
+  if (typeof seedCatalog !== "string" || typeof seedDemoOrders !== "string") {
+    return c.json({ detail: "Seed data is not configured on this worker" }, 500);
+  }
+
+  // Reset first: demo orders, payments, history and mail log are demo data;
+  // the catalog (categories, products, coupons) stays and is re-seeded with
+  // `INSERT OR IGNORE`, so re-running is a no-op.
+  await c.env.DB.batch([
+    c.env.DB.prepare("DELETE FROM order_items"),
+    c.env.DB.prepare("DELETE FROM payments"),
+    c.env.DB.prepare("DELETE FROM order_status_history"),
+    c.env.DB.prepare("DELETE FROM email_log"),
+    c.env.DB.prepare("DELETE FROM orders"),
+  ]);
+
+  await runSeedSql(c, seedCatalog);
+  await runSeedSql(c, seedDemoOrders);
+
+  return c.json({ ok: true });
+});
+
 /** The coupons of the store, newest code first. */
 adminRoutes.get("/coupons", async (c: AdminContext) => {
   const { results } = await c.env.DB

@@ -3,6 +3,14 @@ export interface Env {
   IMAGES: R2Bucket;
   JWT_SECRET: string;
   FRONTEND_ORIGIN: string;
+  /**
+   * The seed SQL (Task 13), read from `worker/seed/` in Node by the test
+   * runner and provided as wrangler vars at runtime. `seed.test.ts` runs both
+   * files in its setup; `POST /api/admin/demo-data/seed` runs them on demand.
+   * Optional: the worker works without them, the seed endpoint answers 500.
+   */
+  SEED_CATALOG?: string;
+  SEED_DEMO_ORDERS?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   /**
