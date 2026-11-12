@@ -14,7 +14,10 @@ export default function NewArrivals() {
 
   useEffect(() => {
     let alive = true;
-    API.get("/products", { params: { new_arrivals: "1", limit: 4 } })
+    // `sort=newest` is what makes this section react to the admin dashboard:
+    // the default sort (most_ordered) always buries a fresh product that has
+    // zero orders behind the seeded best sellers.
+    API.get("/products", { params: { new_arrivals: "1", sort: "newest", limit: 4 } })
       .then((r) => {
         if (alive && Array.isArray(r.data)) {
           setProducts(r.data);

@@ -21,9 +21,9 @@ const CARD_VARIANTS = {
 };
 
 const cardEntries = [
-  { key: "revenue", label: "Revenue", valueKey: "revenue", testid: "stat-revenue", formatted: true },
+  { key: "revenue", label: "Revenue", valueKey: "revenue", testid: "stat-revenue", formatted: true, isPaise: true },
   { key: "orders", label: "Orders", valueKey: "orders", testid: "stat-orders", formatted: false },
-  { key: "avg-order", label: "Avg. Order", valueKey: "avg_order", testid: "stat-avg-order", formatted: true },
+  { key: "avg-order", label: "Avg. Order", valueKey: "avg_order", testid: "stat-avg-order", formatted: true, isPaise: true },
   { key: "low-stock", label: "Low Stock (≤ 10)", valueKey: "low_stock", testid: "stat-low-stock", formatted: false },
 ];
 
@@ -78,7 +78,7 @@ export default function Overview() {
             Overview
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Key store aggregates over the last 30 days · {user?.email ? `Signed in as {user.email}` : ""}
+            Key store aggregates over the last 30 days · {user?.email ? `Signed in as ${user.email}` : ""}
           </p>
         </div>
         <div data-testid="demo-data-banner" className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3">
@@ -125,7 +125,7 @@ export default function Overview() {
       >
         {cardEntries.map((card, i) => {
           let display = stats[card.valueKey] ?? 0;
-          if (card.formatted) display = inr(display);
+          if (card.formatted) display = inr(card.isPaise ? display / 100 : display);
           return (
             <motion.div
               key={card.key}
@@ -163,83 +163,78 @@ export default function Overview() {
                 </defs>
                 <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#64748B" }} />
                 <YAxis tick={{ fontSize: 11, fill: "#64748B" }} allowDecimals={false} />
-                <Tooltip formatter={(value) => `₹${Number(value).toLocaleString("en-IN")}`} />
+                <Tooltip formatter={(value) => `₹${Math.round(Number(value) / 100).toLocaleString("en-IN")}`} />
                 <Area type="monotone" dataKey="total" stroke="#FF3B30" fill="url(#color-revenue)" dot={false} strokeWidth={2} />
               </AreaChart>
             </ResponsiveContainer>
           </div>
         </motion.div>
 
-        <AnimatePresence>
-          {!loading && orders === 0 ? (
+        {!loading && orders === 0 ? (
+          <motion.div
+            key="empty"
+            data-testid="overview-empty"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex flex-col items-center justify-center h-96 rounded-2xl border border-slate-200 border-dashed bg-white p-6 shadow-sm lg:col-span-2"
+          >
+            <p className="text-sm font-medium text-slate-900">No sales yet</p>
+            <p className="text-xs text-slate-400 mt-1">Reset demo data to seed the store.</p>
+          </motion.div>
+        ) : (
+          <>
             <motion.div
-              key="empty"
-              data-testid="overview-empty"
+              key="orders-by-status"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="flex flex-col items-center justify-center h-96 rounded-2xl border border-slate-200 border-dashed bg-white p-6 shadow-sm"
+              className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
             >
-              <p className="text-sm font-medium text-slate-900">No sales yet</p>
-              <p className="text-xs text-slate-400 mt-1">Reset demo data to seed the store.</p>
+              <h2 className="text-sm font-bold uppercase tracking-wider text-slate-400 mb-4">Orders by status</h2>
+              <div data-testid="chart-orders-by-status" className="h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={ordersByStatus}>
+                    <defs>
+                      <linearGradient id="color-status" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#FF3B30" />
+                        <stop offset="100%" stopColor="#FF6B00" />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="#E2E8F0" />
+                    <XAxis dataKey="status" tick={{ fontSize: 11, fill: "#64748B" }} />
+                    <YAxis tick={{ fontSize: 11, fill: "#64748B" }} allowDecimals={false} />
+                    <Tooltip formatter={(value) => `${value} orders`} />
+                    <Bar dataKey="count" fill="url(#color-status)" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
             </motion.div>
-          ) : (
-            <>
-              <motion.div
-                key="orders-by-status"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
-              >
-                <h2 className="text-sm font-bold uppercase tracking-wider text-slate-400 mb-4">Orders by status</h2>
-                <div data-testid="chart-orders-by-status" className="h-64 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={ordersByStatus}>
-                      <defs>
-                        <linearGradient id="color-status" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#FF3B30" />
-                          <stop offset="100%" stopColor="#FF6B00" />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="#E2E8F0" />
-                      <XAxis dataKey="status" tick={{ fontSize: 11, fill: "#64748B" }} />
-                      <YAxis tick={{ fontSize: 11, fill: "#64748B" }} allowDecimals={false} />
-                      <Tooltip formatter={(value) => `${value} orders`} />
-                      <Bar dataKey="count" fill="url(#color-status)" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </motion.div>
 
-              <motion.div
-                key="top-products"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
-              >
-                <h2 className="text-sm font-bold uppercase tracking-wider text-slate-400 mb-4">Top products</h2>
-                <div data-testid="chart-top-products" className="h-64 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart layout="horizontal" data={topProducts}>
-                      <defs>
-                        <linearGradient id="color-products" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#FF6B00" />
-                          <stop offset="100%" stopColor="#FF3B30" />
-                        </linearGradient>
-                      </defs>
-                      <YAxis dataKey="name" type="category" width={130} tick={{ fontSize: 11, fill: "#64748B" }} />
-                      <XAxis tick={{ fontSize: 11, fill: "#64748B" }} allowDecimals={false} />
-                      <Tooltip formatter={(value) => `${value} sold`} />
-                      <Bar dataKey="qty" fill="url(#color-products)" radius={[0, 4, 4, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </motion.div>
-            </>
-          )}
-        </AnimatePresence>
+            <motion.div
+              key="top-products"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+            >
+              <h2 className="text-sm font-bold uppercase tracking-wider text-slate-400 mb-4">Top products</h2>
+              <div data-testid="chart-top-products" className="h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart layout="vertical" data={topProducts}>
+                    <defs>
+                      <linearGradient id="color-products" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#FF6B00" />
+                        <stop offset="100%" stopColor="#FF3B30" />
+                      </linearGradient>
+                    </defs>
+                    <XAxis type="number" tick={{ fontSize: 11, fill: "#64748B" }} allowDecimals={false} />
+                    <YAxis dataKey="name" type="category" width={130} tick={{ fontSize: 11, fill: "#64748B" }} />
+                    <Tooltip formatter={(value) => `${value} sold`} />
+                    <Bar dataKey="qty" fill="url(#color-products)" radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </motion.div>
+          </>
+        )}
       </div>
 
       {loading && (

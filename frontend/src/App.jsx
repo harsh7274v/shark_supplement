@@ -17,12 +17,23 @@ class ErrorBoundary extends Component {
   static getDerivedStateFromError(error) {
     return { error };
   }
+  componentDidCatch(error, errorInfo) {
+    console.error("ErrorBoundary caught an error:", error, errorInfo);
+  }
   render() {
     if (this.state.error) {
       return (
         <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-white px-8 text-center">
           <p className="font-display font-black text-3xl text-slate-900">Something snapped.</p>
           <p className="text-slate-500 font-semibold">Reload the page to get back to training.</p>
+          <div className="mt-4 p-4 rounded-xl bg-red-50 border border-red-200 text-left max-w-2xl w-full">
+            <p className="text-xs font-bold text-red-700 uppercase tracking-wider mb-1">Error details</p>
+            <pre className="text-xs font-mono text-red-600 whitespace-pre-wrap break-all">
+              {this.state.error?.message || String(this.state.error)}
+              {"\n\n"}
+              {this.state.error?.stack}
+            </pre>
+          </div>
         </div>
       );
     }
@@ -62,9 +73,14 @@ function AppRouter() {
       <Route path="/auth/callback" element={<AuthCallback />} />
       <Route path="/my-orders" element={<MyOrders />} />
       <Route
-        path="/admin"
+        path="/admin/*"
         element={
-          user !== null && user !== false && user.role === "admin" ? (
+          user === null ? (
+            <div className="min-h-screen flex flex-col items-center justify-center bg-kinetic-ink text-white gap-3">
+              <div className="w-8 h-8 border-4 border-kinetic-red border-t-transparent rounded-full animate-spin" />
+              <p className="text-slate-400 text-sm font-semibold">Verifying admin access…</p>
+            </div>
+          ) : user && user.role === "admin" ? (
             <Suspense fallback={null}>
               <AdminLayout />
             </Suspense>
@@ -72,9 +88,7 @@ function AppRouter() {
             <Navigate to="/" replace />
           )
         }
-      >
-        {/* AdminLayout owns the admin sub-routes (Overview, Products, Categories, New Arrivals). */}
-      </Route>
+      />
     </Routes>
   );
 }

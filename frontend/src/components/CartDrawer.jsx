@@ -38,7 +38,10 @@ export default function CartDrawer() {
       <AnimatePresence>
         {cartOpen && (
           <>
+            {/* Both children carry explicit keys: AnimatePresence tracks its
+                children by key. */}
             <motion.div
+              key="cart-overlay"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -48,6 +51,7 @@ export default function CartDrawer() {
               data-testid="cart-drawer-overlay"
             />
             <motion.aside
+              key="cart-drawer"
               initial={{ x: "100%" }}
               animate={{ x: 0 }}
               exit={{ x: "100%" }}
@@ -94,13 +98,15 @@ export default function CartDrawer() {
               ) : (
                 <>
                   <div className="flex-1 overflow-y-auto kinetic-scroll px-6 py-4 space-y-4" data-lenis-prevent>
+                    {/* No `layout` prop on the rows: a row unmounting while
+                        the drawer is open leaves framer-motion's projection
+                        stuck, the drawer's own exit then never runs, and the
+                        overlay stays mounted blocking the page. */}
                     {items.map((item) => (
                       <motion.div
                         key={item.key}
-                        layout
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, x: 40 }}
                         className="flex gap-3.5 rounded-2xl border border-slate-100 p-3"
                         data-testid={`cart-item-${item.product.id}`}
                       >

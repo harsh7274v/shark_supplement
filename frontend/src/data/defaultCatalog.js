@@ -239,3 +239,4 @@ export const DEFAULT_PRODUCTS = [
     in_stock: true,
   },
 ];
+

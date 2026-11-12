@@ -8,6 +8,42 @@ export const API = axios.create({
   withCredentials: true,
 });
 
+/**
+ * The session lives in HttpOnly cookies only — never in localStorage — so
+ * every tab of the browser shares exactly one server-side session and no
+ * script can read a token. When an access token expires (15 min), one silent
+ * refresh through the refresh cookie retries the original call once.
+ */
+API.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const original = error?.config;
+    const url = original?.url || "";
+    const isAuthCall =
+      url.includes("/auth/login") ||
+      url.includes("/auth/register") ||
+      url.includes("/auth/refresh");
+    if (
+      error?.response?.status === 401 &&
+      original &&
+      !isAuthCall &&
+      !original._retry
+    ) {
+      original._retry = true;
+      try {
+        await axios.post(`${backendUrl}/api/auth/refresh`, null, {
+          withCredentials: true,
+        });
+        return API(original);
+      } catch {
+        // The refresh cookie is gone too: the caller sees the 401 and the
+        // auth context drops to guest on its next /auth/me check.
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 export function formatApiError(e) {
   const detail = e?.response?.data?.detail;
   if (detail == null) return e?.message || "Something went wrong. Please try again.";

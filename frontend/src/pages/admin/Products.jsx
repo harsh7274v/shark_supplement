@@ -302,13 +302,15 @@ export default function Products({ tab = "list" }) {
         </AnimatePresence>
       </div>
 
-      {open && (
-        <ProductForm
-          product={editing}
-          onClose={() => setOpen(false)}
-          onSave={handleSave}
-        />
-      )}
+      <AnimatePresence>
+        {open && (
+          <ProductForm
+            product={editing}
+            onClose={() => setOpen(false)}
+            onSave={handleSave}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

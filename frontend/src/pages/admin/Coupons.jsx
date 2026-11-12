@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { Plus, Trash2, Edit2, RefreshCw } from "lucide-react";
 import { API, inr, formatApiError } from "../../lib/api";
 import { toast } from "sonner";
@@ -282,128 +282,132 @@ export default function Coupons() {
         </AnimatePresence>
       </div>
 
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={closeForm}>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/40 backdrop-blur-sm"
-          />
-          <motion.div
-            initial={{ opacity: 0, y: 24 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 24 }}
-            className="absolute top-10 sm:top-6 left-4 sm:left-[10%] w-full sm:w-[80%] max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl p-6"
-          >
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="font-display font-bold text-xl text-slate-900">
-                {editing ? "Edit coupon" : "Add coupon"}
-              </h2>
-              <button
-                data-testid="admin-coupon-form-close"
-                onClick={closeForm}
-                className="text-slate-400 hover:text-slate-900"
-              >
-                ✕
-              </button>
-            </div>
-            <form onSubmit={handleSave} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                  Code
-                </label>
-                <input
-                  data-testid="admin-coupon-code"
-                  value={form.code}
-                  onChange={(event) => setField("code", event.target.value)}
-                  className={`w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors ${
-                    errors.code ? "border-red-500 ring-1 ring-red-500" : "border-slate-200"
-                  }`}
-                  placeholder="e.g. KINETIC10"
-                />
-                {errors.code && <p className="text-xs text-red-600 mt-1">{errors.code}</p>}
-              </div>
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                  Type
-                </label>
-                <select
-                  data-testid="admin-coupon-type"
-                  value={form.discount_type}
-                  onChange={(event) => setField("discount_type", event.target.value)}
-                  className="w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors border-slate-200"
-                >
-                  <option value="percent">Percent off</option>
-                  <option value="flat">Flat ₹ off</option>
-                </select>
-                {errors.discount_type && <p className="text-xs text-red-600 mt-1">{errors.discount_type}</p>}
-              </div>
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                  Value
-                </label>
-                <input
-                  data-testid="admin-coupon-value"
-                  type="text"
-                  value={form.discount_value}
-                  onChange={(event) => setField("discount_value", event.target.value)}
-                  className={`w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors ${
-                    errors.discount_value ? "border-red-500 ring-1 ring-red-500" : "border-slate-200"
-                  }`}
-                  placeholder={form.discount_type === "percent" ? "e.g. 10" : "e.g. 100"}
-                />
-                {errors.discount_value && <p className="text-xs text-red-600 mt-1">{errors.discount_value}</p>}
-              </div>
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                  Min order (₹)
-                </label>
-                <input
-                  data-testid="admin-coupon-min-order"
-                  type="text"
-                  value={form.min_order}
-                  onChange={(event) => setField("min_order", event.target.value)}
-                  className={`w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors ${
-                    errors.min_order ? "border-red-500 ring-1 ring-red-500" : "border-slate-200"
-                  }`}
-                  placeholder="e.g. 999"
-                />
-                {errors.min_order && <p className="text-xs text-red-600 mt-1">{errors.min_order}</p>}
-              </div>
-              <div className="flex items-center gap-3">
-                <input
-                  data-testid="admin-coupon-active"
-                  type="checkbox"
-                  checked={form.active === "1"}
-                  onChange={(event) => setField("active", event.target.checked ? "1" : "0")}
-                  className="w-4 h-4 rounded border-slate-300 text-kinetic-red focus:ring-kinetic-red"
-                />
-                <label className="text-sm font-semibold text-slate-700">Active</label>
-                {errors.active && <p className="text-xs text-red-600">{errors.active}</p>}
-              </div>
-              <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
+      <AnimatePresence>
+        {open && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={closeForm}>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/40 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 24 }}
+              onClick={(event) => event.stopPropagation()}
+              className="relative z-10 w-full max-w-md max-h-[90vh] overflow-y-auto bg-white rounded-2xl border border-slate-200 shadow-2xl p-6"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="font-display font-bold text-xl text-slate-900">
+                  {editing ? "Edit coupon" : "Add coupon"}
+                </h2>
                 <button
-                  data-testid="admin-coupon-cancel"
                   type="button"
+                  data-testid="admin-coupon-form-close"
                   onClick={closeForm}
-                  className="px-4 py-2 rounded-xl text-sm font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
+                  className="text-slate-400 hover:text-slate-900 text-lg p-1"
                 >
-                  Cancel
-                </button>
-                <button
-                  data-testid="admin-coupon-save"
-                  type="submit"
-                  disabled={saving}
-                  className="px-4 py-2 rounded-xl text-sm font-bold text-white bg-kinetic-red hover:bg-red-600 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-                >
-                  {saving ? "Saving…" : "Save coupon"}
+                  ✕
                 </button>
               </div>
-            </form>
-          </motion.div>
-        </div>
-      )}
+              <form onSubmit={handleSave} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                    Code
+                  </label>
+                  <input
+                    data-testid="admin-coupon-code"
+                    value={form.code}
+                    onChange={(event) => setField("code", event.target.value)}
+                    className={`w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors ${
+                      errors.code ? "border-red-500 ring-1 ring-red-500" : "border-slate-200"
+                    }`}
+                    placeholder="e.g. KINETIC10"
+                  />
+                  {errors.code && <p className="text-xs text-red-600 mt-1">{errors.code}</p>}
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                    Type
+                  </label>
+                  <select
+                    data-testid="admin-coupon-type"
+                    value={form.discount_type}
+                    onChange={(event) => setField("discount_type", event.target.value)}
+                    className="w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors border-slate-200"
+                  >
+                    <option value="percent">Percent off</option>
+                    <option value="flat">Flat ₹ off</option>
+                  </select>
+                  {errors.discount_type && <p className="text-xs text-red-600 mt-1">{errors.discount_type}</p>}
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                    Value
+                  </label>
+                  <input
+                    data-testid="admin-coupon-value"
+                    type="text"
+                    value={form.discount_value}
+                    onChange={(event) => setField("discount_value", event.target.value)}
+                    className={`w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors ${
+                      errors.discount_value ? "border-red-500 ring-1 ring-red-500" : "border-slate-200"
+                    }`}
+                    placeholder={form.discount_type === "percent" ? "e.g. 10" : "e.g. 100"}
+                  />
+                  {errors.discount_value && <p className="text-xs text-red-600 mt-1">{errors.discount_value}</p>}
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                    Min order (₹)
+                  </label>
+                  <input
+                    data-testid="admin-coupon-min-order"
+                    type="text"
+                    value={form.min_order}
+                    onChange={(event) => setField("min_order", event.target.value)}
+                    className={`w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors ${
+                      errors.min_order ? "border-red-500 ring-1 ring-red-500" : "border-slate-200"
+                    }`}
+                    placeholder="e.g. 999"
+                  />
+                  {errors.min_order && <p className="text-xs text-red-600 mt-1">{errors.min_order}</p>}
+                </div>
+                <div className="flex items-center gap-3">
+                  <input
+                    data-testid="admin-coupon-active"
+                    type="checkbox"
+                    checked={form.active === "1"}
+                    onChange={(event) => setField("active", event.target.checked ? "1" : "0")}
+                    className="w-4 h-4 rounded border-slate-300 text-kinetic-red focus:ring-kinetic-red"
+                  />
+                  <label className="text-sm font-semibold text-slate-700">Active</label>
+                  {errors.active && <p className="text-xs text-red-600">{errors.active}</p>}
+                </div>
+                <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
+                  <button
+                    data-testid="admin-coupon-cancel"
+                    type="button"
+                    onClick={closeForm}
+                    className="px-4 py-2 rounded-xl text-sm font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    data-testid="admin-coupon-save"
+                    type="submit"
+                    disabled={saving}
+                    className="px-4 py-2 rounded-xl text-sm font-bold text-white bg-kinetic-red hover:bg-red-600 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {saving ? "Saving…" : "Save coupon"}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

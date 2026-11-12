@@ -9,6 +9,12 @@ export function AuthProvider({ children }) {
   const [modal, setModal] = useState({ open: false, tab: "login" });
 
   useEffect(() => {
+    // One-time cleanup: older builds kept tokens in localStorage, which every
+    // tab shared (and any script could read). The session now lives only in
+    // HttpOnly cookies, so stale keys are dropped on boot.
+    localStorage.removeItem("kinetic_access_token");
+    localStorage.removeItem("kinetic_refresh_token");
+
     if (window.location.hash?.includes("session_id=")) return;
     API.get("/auth/me")
       .then((r) => setUser(r.data))
@@ -33,8 +39,11 @@ export function AuthProvider({ children }) {
   };
 
   const logout = async () => {
-    await API.post("/auth/logout");
-    setUser(false);
+    try {
+      await API.post("/auth/logout");
+    } finally {
+      setUser(false);
+    }
   };
 
   const googleLogin = () => {
@@ -51,4 +60,3 @@ export function AuthProvider({ children }) {
     </AuthContext.Provider>
   );
 }
-

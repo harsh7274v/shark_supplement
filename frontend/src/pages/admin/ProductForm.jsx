@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { X, Image as ImageIcon } from "lucide-react";
 import { API, toPaise, formatApiError } from "../../lib/api";
@@ -53,6 +53,7 @@ export default function ProductForm({ product: initialProduct, onSave, onClose }
   const [categories, setCategories] = useState([]);
   const [catsLoading, setCatsLoading] = useState(false);
   const [discount, setDiscount] = useState(0);
+  const fileInputRef = useRef(null);
 
   // ---------- bootstrap ----------
   useEffect(() => {
@@ -208,6 +209,7 @@ export default function ProductForm({ product: initialProduct, onSave, onClose }
 
   const chip = (value, label, selected) => (
     <button
+      type="button"
       key={value}
       data-testid={`admin-product-chip-${value}`}
       onClick={() => setField("category_id", value)}
@@ -222,7 +224,7 @@ export default function ProductForm({ product: initialProduct, onSave, onClose }
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -233,13 +235,20 @@ export default function ProductForm({ product: initialProduct, onSave, onClose }
         initial={{ opacity: 0, y: 24 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 24 }}
-        className="absolute top-10 sm:top-6 left-4 sm:left-[10%] w-full sm:w-[80%] max-w-5xl bg-white rounded-2xl border border-slate-200 shadow-2xl p-6"
+        onClick={(event) => event.stopPropagation()}
+        className="relative z-10 w-full max-w-5xl max-h-[90vh] overflow-y-auto kinetic-scroll bg-white rounded-2xl border border-slate-200 shadow-2xl p-6"
+        data-lenis-prevent
       >
         <div className="flex items-center justify-between mb-6">
           <h2 className="font-display font-bold text-xl text-slate-900">
             {mode === "edit" ? "Edit product" : "Add product"}
           </h2>
-          <button data-testid="admin-product-form-close" onClick={onClose} className="text-slate-400 hover:text-slate-900">
+          <button
+            type="button"
+            data-testid="admin-product-form-close"
+            onClick={onClose}
+            className="text-slate-400 hover:text-slate-900 p-1"
+          >
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -254,6 +263,7 @@ export default function ProductForm({ product: initialProduct, onSave, onClose }
               </div>
               <div
                 data-testid="admin-product-image-input"
+                onClick={() => fileInputRef.current?.click()}
                 onDrop={(event) => {
                   event.preventDefault();
                   handleFiles(event.dataTransfer.files);
@@ -264,6 +274,7 @@ export default function ProductForm({ product: initialProduct, onSave, onClose }
                 <ImageIcon className="w-6 h-6" />
                 <p className="text-sm">Drag &amp; drop images, or click to browse</p>
                 <input
+                  ref={fileInputRef}
                   type="file"
                   multiple
                   accept="image/*"
@@ -290,6 +301,7 @@ export default function ProductForm({ product: initialProduct, onSave, onClose }
                       </span>
                     )}
                     <button
+                      type="button"
                       onClick={(event) => {
                         event.stopPropagation();
                         removeImage(index);

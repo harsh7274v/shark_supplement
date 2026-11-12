@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { Plus, Trash2, Edit2, RefreshCw } from "lucide-react";
 import { API, formatApiError } from "../../lib/api";
 import { toast } from "sonner";
@@ -234,119 +234,123 @@ export default function Categories() {
         </AnimatePresence>
       </div>
 
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={closeForm}>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/40 backdrop-blur-sm"
-          />
-          <motion.div
-            initial={{ opacity: 0, y: 24 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 24 }}
-            className="absolute top-10 sm:top-6 left-4 sm:left-[10%] w-full sm:w-[80%] max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl p-6"
-          >
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="font-display font-bold text-xl text-slate-900">
-                {editing ? "Edit category" : "Add category"}
-              </h2>
-              <button
-                data-testid="admin-category-form-close"
-                onClick={closeForm}
-                className="text-slate-400 hover:text-slate-900"
-              >
-                ✕
-              </button>
-            </div>
-            <form onSubmit={handleSave} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                  Name
-                </label>
-                <input
-                  data-testid="admin-category-name"
-                  value={form.name}
-                  onChange={(event) => setField("name", event.target.value)}
-                  className={`w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors ${
-                    errors.name ? "border-red-500 ring-1 ring-red-500" : "border-slate-200"
-                  }`}
-                  placeholder="e.g. Proteins"
-                />
-                {errors.name && <p className="text-xs text-red-600 mt-1">{errors.name}</p>}
-              </div>
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                  Slug (URL key)
-                </label>
-                <input
-                  data-testid="admin-category-slug"
-                  value={form.slug}
-                  onChange={(event) => setField("slug", event.target.value)}
-                  className="w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors border-slate-200"
-                  placeholder="e.g. proteins"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                  Image URL
-                </label>
-                <input
-                  data-testid="admin-category-image-url"
-                  value={form.image_url}
-                  onChange={(event) => setField("image_url", event.target.value)}
-                  className="w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors border-slate-200"
-                  placeholder="/api/images/products/...jpg"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                  Tagline
-                </label>
-                <input
-                  data-testid="admin-category-tagline"
-                  value={form.tagline}
-                  onChange={(event) => setField("tagline", event.target.value)}
-                  className="w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors border-slate-200"
-                  placeholder="e.g. Whey, isolate & plant protein"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                  Sort order
-                </label>
-                <input
-                  data-testid="admin-category-sort-order"
-                  type="text"
-                  value={form.sort_order}
-                  onChange={(event) => setField("sort_order", event.target.value)}
-                  className="w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors border-slate-200"
-                  placeholder="0"
-                />
-              </div>
-              <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
+      <AnimatePresence>
+        {open && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={closeForm}>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/40 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 24 }}
+              onClick={(event) => event.stopPropagation()}
+              className="relative z-10 w-full max-w-md max-h-[90vh] overflow-y-auto bg-white rounded-2xl border border-slate-200 shadow-2xl p-6"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="font-display font-bold text-xl text-slate-900">
+                  {editing ? "Edit category" : "Add category"}
+                </h2>
                 <button
-                  data-testid="admin-category-cancel"
                   type="button"
+                  data-testid="admin-category-form-close"
                   onClick={closeForm}
-                  className="px-4 py-2 rounded-xl text-sm font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
+                  className="text-slate-400 hover:text-slate-900 text-lg p-1"
                 >
-                  Cancel
-                </button>
-                <button
-                  data-testid="admin-category-save"
-                  type="submit"
-                  disabled={saving}
-                  className="px-4 py-2 rounded-xl text-sm font-bold text-white bg-kinetic-red hover:bg-red-600 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-                >
-                  {saving ? "Saving…" : "Save category"}
+                  ✕
                 </button>
               </div>
-            </form>
-          </motion.div>
-        </div>
-      )}
+              <form onSubmit={handleSave} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                    Name
+                  </label>
+                  <input
+                    data-testid="admin-category-name"
+                    value={form.name}
+                    onChange={(event) => setField("name", event.target.value)}
+                    className={`w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors ${
+                      errors.name ? "border-red-500 ring-1 ring-red-500" : "border-slate-200"
+                    }`}
+                    placeholder="e.g. Proteins"
+                  />
+                  {errors.name && <p className="text-xs text-red-600 mt-1">{errors.name}</p>}
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                    Slug (URL key)
+                  </label>
+                  <input
+                    data-testid="admin-category-slug"
+                    value={form.slug}
+                    onChange={(event) => setField("slug", event.target.value)}
+                    className="w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors border-slate-200"
+                    placeholder="e.g. proteins"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                    Image URL
+                  </label>
+                  <input
+                    data-testid="admin-category-image-url"
+                    value={form.image_url}
+                    onChange={(event) => setField("image_url", event.target.value)}
+                    className="w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors border-slate-200"
+                    placeholder="/api/images/products/...jpg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                    Tagline
+                  </label>
+                  <input
+                    data-testid="admin-category-tagline"
+                    value={form.tagline}
+                    onChange={(event) => setField("tagline", event.target.value)}
+                    className="w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors border-slate-200"
+                    placeholder="e.g. Whey, isolate & plant protein"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                    Sort order
+                  </label>
+                  <input
+                    data-testid="admin-category-sort-order"
+                    type="text"
+                    value={form.sort_order}
+                    onChange={(event) => setField("sort_order", event.target.value)}
+                    className="w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors border-slate-200"
+                    placeholder="0"
+                  />
+                </div>
+                <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
+                  <button
+                    data-testid="admin-category-cancel"
+                    type="button"
+                    onClick={closeForm}
+                    className="px-4 py-2 rounded-xl text-sm font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    data-testid="admin-category-save"
+                    type="submit"
+                    disabled={saving}
+                    className="px-4 py-2 rounded-xl text-sm font-bold text-white bg-kinetic-red hover:bg-red-600 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {saving ? "Saving…" : "Save category"}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 
