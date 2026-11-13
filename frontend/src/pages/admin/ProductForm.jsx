@@ -19,30 +19,57 @@ const blankForm = () => ({
   mrp: "",
   sale: "",
   stock: "",
-  flavors: "",
-  weights: "",
+  flavorRows: [{ label: "", image: "" }],
+  sizeRows: [{ label: "", price: "", image: "" }],
+  contents: "",
+  nutrition: "",
   badge: "none",
   isNewArrival: false,
   isActive: true,
   images: [],
 });
 
+/** The fallback of an empty row list: one blank row to start typing into. */
+const blankFlavorRow = () => ({ label: "", image: "" });
+const blankSizeRow = () => ({ label: "", price: "", image: "" });
+
 /** Turns a product served by the API into the form's local state. */
-const loadForm = (product) => ({
-  name: product.name ?? "",
-  brand: product.brand ?? "",
-  description: product.description ?? "",
-  category_id: product.category_id ?? "",
-  mrp: product.mrp != null ? String(product.mrp / 100) : "",
-  sale: product.sale_price != null ? String(product.sale_price / 100) : "",
-  stock: product.stock != null ? String(product.stock) : "",
-  flavors: Array.isArray(product.flavors) ? product.flavors.join(", ") : "",
-  weights: Array.isArray(product.weight_options) ? product.weight_options.join(", ") : "",
-  badge: product.badge ?? "none",
-  isNewArrival: product.is_new_arrival === 1,
-  isActive: product.is_active === 1,
-  images: Array.isArray(product.images) ? [...product.images] : [],
-});
+const loadForm = (product) => {
+  // The rows follow the label order of the product; the maps only fill the
+  // photo and the per-size price of a row that carries one.
+  const flavorRows = (Array.isArray(product.flavors) ? product.flavors : []).map((label) => ({
+    label,
+    image: product.flavor_images?.[label] ?? "",
+  }));
+  const sizeRows = (Array.isArray(product.weight_options) ? product.weight_options : []).map(
+    (label) => ({
+      label,
+      price:
+        product.weight_prices?.[label] != null
+          ? String(product.weight_prices[label] / 100)
+          : "",
+      image: product.weight_images?.[label] ?? "",
+    }),
+  );
+
+  return {
+    name: product.name ?? "",
+    brand: product.brand ?? "",
+    description: product.description ?? "",
+    category_id: product.category_id ?? "",
+    mrp: product.mrp != null ? String(product.mrp / 100) : "",
+    sale: product.sale_price != null ? String(product.sale_price / 100) : "",
+    stock: product.stock != null ? String(product.stock) : "",
+    flavorRows: flavorRows.length > 0 ? flavorRows : [blankFlavorRow()],
+    sizeRows: sizeRows.length > 0 ? sizeRows : [blankSizeRow()],
+    contents: product.contents ?? "",
+    nutrition: product.nutrition ?? "",
+    badge: product.badge ?? "none",
+    isNewArrival: product.is_new_arrival === 1,
+    isActive: product.is_active === 1,
+    images: Array.isArray(product.images) ? [...product.images] : [],
+  };
+};
 
 export default function ProductForm({ product: initialProduct, onSave, onClose }) {
   const [mode, setMode] = useState(initialProduct ? "edit" : "create");
@@ -54,24 +81,27 @@ export default function ProductForm({ product: initialProduct, onSave, onClose }
   const [catsLoading, setCatsLoading] = useState(false);
   const [discount, setDiscount] = useState(0);
   const fileInputRef = useRef(null);
+  // The hidden input of the per-row photo upload: the row it serves is set
+  // just before the file dialog opens.
+  const variantFileRef = useRef(null);
+  const [variantTarget, setVariantTarget] = useState(null);
 
   // ---------- bootstrap ----------
   useEffect(() => {
     let alive = true;
-    const bootstrap = async () => {
-      await fetchCategories();
-      const product = initialProduct ?? null;
-      if (product) {
-        setMode("edit");
-        setItem(product);
-        setForm(loadForm(product));
-      } else {
-        setMode("create");
-        setItem(null);
-        setForm(blankForm());
-      }
-    };
-    bootstrap();
+    // The form state is decided BEFORE the categories fetch: a reset that
+    // waited for the network could wipe what a fast admin already typed.
+    const product = initialProduct ?? null;
+    if (product) {
+      setMode("edit");
+      setItem(product);
+      setForm(loadForm(product));
+    } else {
+      setMode("create");
+      setItem(null);
+      setForm(blankForm());
+    }
+    fetchCategories();
     return () => {
       alive = false;
     };
@@ -129,6 +159,23 @@ export default function ProductForm({ product: initialProduct, onSave, onClose }
     if (!Number.isFinite(stock) || stock < 0) {
       next.stock = "Stock must be ≥ 0";
     }
+    // Every row needs a label; a filled price has to be a number above 0.
+    form.flavorRows.forEach((row, index) => {
+      if (!row.label.trim()) {
+        next[`flavorLabel-${index}`] = "Label is required";
+      }
+    });
+    form.sizeRows.forEach((row, index) => {
+      if (!row.label.trim()) {
+        next[`sizeLabel-${index}`] = "Label is required";
+      }
+      if (row.price !== "") {
+        const price = Number(row.price);
+        if (!Number.isFinite(price) || price <= 0) {
+          next[`sizePrice-${index}`] = "Price must be a number above 0";
+        }
+      }
+    });
     setErrors(next);
     return Object.keys(next).length > 0;
   };
@@ -169,6 +216,98 @@ export default function ProductForm({ product: initialProduct, onSave, onClose }
     setForm((prev) => ({ ...prev, images: prev.images.filter((_, i) => i !== index) }));
   };
 
+  // ---------- flavor and size rows ----------
+  const setFlavorRow = (index, key, value) => {
+    setForm((prev) => {
+      const rows = [...prev.flavorRows];
+      rows[index] = { ...rows[index], [key]: value };
+      return { ...prev, flavorRows: rows };
+    });
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next[`flavorLabel-${index}`];
+      return next;
+    });
+  };
+
+  const addFlavorRow = () => {
+    setForm((prev) => ({ ...prev, flavorRows: [...prev.flavorRows, blankFlavorRow()] }));
+  };
+
+  const removeFlavorRow = (index) => {
+    setForm((prev) => {
+      const rows = prev.flavorRows.filter((_, i) => i !== index);
+      return { ...prev, flavorRows: rows.length > 0 ? rows : [blankFlavorRow()] };
+    });
+  };
+
+  const setSizeRow = (index, key, value) => {
+    setForm((prev) => {
+      const rows = [...prev.sizeRows];
+      rows[index] = { ...rows[index], [key]: value };
+      return { ...prev, sizeRows: rows };
+    });
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next[`sizeLabel-${index}`];
+      delete next[`sizePrice-${index}`];
+      return next;
+    });
+  };
+
+  const addSizeRow = () => {
+    setForm((prev) => ({ ...prev, sizeRows: [...prev.sizeRows, blankSizeRow()] }));
+  };
+
+  const removeSizeRow = (index) => {
+    setForm((prev) => {
+      const rows = prev.sizeRows.filter((_, i) => i !== index);
+      return { ...prev, sizeRows: rows.length > 0 ? rows : [blankSizeRow()] };
+    });
+  };
+
+  /** Opens the file dialog for one flavor or size row's photo. */
+  const pickVariantPhoto = (kind, index) => {
+    setVariantTarget({ kind, index });
+    variantFileRef.current?.click();
+  };
+
+  /** Uploads the picked file and pins its URL to the row the dialog was for. */
+  const uploadVariantPhoto = (file) => {
+    // Let choosing the same file again fire a change event next time.
+    if (variantFileRef.current) {
+      variantFileRef.current.value = "";
+    }
+    if (!variantTarget || !file) {
+      return;
+    }
+    if (!file.type || !file.type.startsWith("image/")) {
+      toast.error(`"${file.name}" is not an image`);
+      return;
+    }
+    const { kind, index } = variantTarget;
+    const data = new FormData();
+    data.append("file", file);
+    API.post("/admin/uploads", data)
+      .then((response) => {
+        const url = response.data?.url;
+        if (!url) return;
+        setForm((prev) => {
+          if (kind === "flavor") {
+            const rows = [...prev.flavorRows];
+            rows[index] = { ...rows[index], image: url };
+            return { ...prev, flavorRows: rows };
+          }
+          const rows = [...prev.sizeRows];
+          rows[index] = { ...rows[index], image: url };
+          return { ...prev, sizeRows: rows };
+        });
+      })
+      .catch((uploadError) => {
+        toast.error(formatApiError(uploadError) || "Image upload failed");
+      });
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (validate()) {
@@ -176,6 +315,33 @@ export default function ProductForm({ product: initialProduct, onSave, onClose }
     }
     setSaving(true);
     try {
+      // The rows become the label lists and the maps. Rows without a label
+      // are not saved; a size without a price simply inherits the base price.
+      const flavors = [];
+      const flavor_images = {};
+      form.flavorRows.forEach((row) => {
+        const label = row.label.trim();
+        if (!label) return;
+        flavors.push(label);
+        if (row.image) {
+          flavor_images[label] = row.image;
+        }
+      });
+      const weight_options = [];
+      const weight_prices = {};
+      const weight_images = {};
+      form.sizeRows.forEach((row) => {
+        const label = row.label.trim();
+        if (!label) return;
+        weight_options.push(label);
+        if (row.price !== "") {
+          weight_prices[label] = toPaise(row.price);
+        }
+        if (row.image) {
+          weight_images[label] = row.image;
+        }
+      });
+
       const payload = {
         name: form.name,
         brand: form.brand,
@@ -185,8 +351,13 @@ export default function ProductForm({ product: initialProduct, onSave, onClose }
         sale_price: toPaise(form.sale),
         stock: form.stock === "" ? 0 : Number(form.stock),
         images: form.images,
-        flavors: form.flavors.split(",").map((value) => value.trim()).filter(Boolean),
-        weight_options: form.weights.split(",").map((value) => value.trim()).filter(Boolean),
+        flavors,
+        weight_options,
+        flavor_images,
+        weight_images,
+        weight_prices,
+        contents: form.contents,
+        nutrition: form.nutrition,
         badge: form.badge,
         is_new_arrival: form.isNewArrival ? 1 : 0,
         is_active: form.isActive ? 1 : 0,
@@ -280,6 +451,19 @@ export default function ProductForm({ product: initialProduct, onSave, onClose }
                   accept="image/*"
                   className="hidden"
                   onChange={(event) => handleFiles(event.target.files)}
+                />
+                {/* The one hidden input of the per-row photo uploads: the
+                    target row is set right before the dialog opens. Its own
+                    click must not bubble — it sits inside the clickable
+                    dropzone, and a bubbling click would open the GALLERY
+                    chooser instead of this one. */}
+                <input
+                  ref={variantFileRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={(event) => uploadVariantPhoto(event.target.files?.[0])}
                 />
               </div>
               <div className="flex flex-wrap gap-3">
@@ -448,28 +632,167 @@ export default function ProductForm({ product: initialProduct, onSave, onClose }
                   />
                   {errors.stock && <p className="text-xs text-red-600 mt-1">{errors.stock}</p>}
                 </div>
+                {/* Flavors: one row per label, each with an optional photo. */}
+                <div className="col-span-2 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">
+                      Flavors
+                    </h3>
+                    <button
+                      type="button"
+                      data-testid="flavor-add-btn"
+                      onClick={addFlavorRow}
+                      className="px-3 py-1.5 rounded-xl text-xs font-bold text-kinetic-red border border-slate-200 hover:border-kinetic-red transition-colors"
+                    >
+                      + Add flavor
+                    </button>
+                  </div>
+                  {form.flavorRows.map((row, index) => (
+                    <div key={index} className="flex items-start gap-2">
+                      <div className="flex-1">
+                        <input
+                          data-testid={`flavor-label-${index}`}
+                          value={row.label}
+                          onChange={(event) => setFlavorRow(index, "label", event.target.value)}
+                          className={`w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors ${
+                            errors[`flavorLabel-${index}`] ? "border-red-500 ring-1 ring-red-500" : "border-slate-200"
+                          }`}
+                          placeholder="e.g. Smooth Vanilla"
+                        />
+                        {errors[`flavorLabel-${index}`] && (
+                          <p className="text-xs text-red-600 mt-1">{errors[`flavorLabel-${index}`]}</p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        data-testid={`flavor-photo-btn-${index}`}
+                        onClick={() => pickVariantPhoto("flavor", index)}
+                        title={row.image ? "Change photo" : "Add photo"}
+                        className={`w-10 h-10 shrink-0 rounded-xl border flex items-center justify-center overflow-hidden transition-colors ${
+                          row.image
+                            ? "border-transparent"
+                            : "border-slate-200 text-slate-400 hover:border-kinetic-red hover:text-kinetic-red"
+                        }`}
+                      >
+                        {row.image ? (
+                          <img src={row.image} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <ImageIcon className="w-4 h-4" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        data-testid={`flavor-remove-${index}`}
+                        onClick={() => removeFlavorRow(index)}
+                        className="w-10 h-10 shrink-0 rounded-xl border border-slate-200 text-slate-400 hover:bg-kinetic-red hover:text-white hover:border-kinetic-red flex items-center justify-center transition-colors"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Sizes: label, optional per-size price (₹, blank inherits the
+                    base price) and the photo the card shows for the size. */}
+                <div className="col-span-2 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">
+                      Sizes
+                    </h3>
+                    <button
+                      type="button"
+                      data-testid="size-add-btn"
+                      onClick={addSizeRow}
+                      className="px-3 py-1.5 rounded-xl text-xs font-bold text-kinetic-red border border-slate-200 hover:border-kinetic-red transition-colors"
+                    >
+                      + Add size
+                    </button>
+                  </div>
+                  {form.sizeRows.map((row, index) => (
+                    <div key={index} className="flex items-start gap-2">
+                      <div className="flex-1">
+                        <input
+                          data-testid={`size-label-${index}`}
+                          value={row.label}
+                          onChange={(event) => setSizeRow(index, "label", event.target.value)}
+                          className={`w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors ${
+                            errors[`sizeLabel-${index}`] ? "border-red-500 ring-1 ring-red-500" : "border-slate-200"
+                          }`}
+                          placeholder="e.g. 2 kg"
+                        />
+                        {errors[`sizeLabel-${index}`] && (
+                          <p className="text-xs text-red-600 mt-1">{errors[`sizeLabel-${index}`]}</p>
+                        )}
+                      </div>
+                      <div className="w-32">
+                        <input
+                          data-testid={`size-price-${index}`}
+                          type="text"
+                          value={row.price}
+                          onChange={(event) => setSizeRow(index, "price", event.target.value)}
+                          className={`w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors ${
+                            errors[`sizePrice-${index}`] ? "border-red-500 ring-1 ring-red-500" : "border-slate-200"
+                          }`}
+                          placeholder="₹ (blank = base)"
+                        />
+                        {errors[`sizePrice-${index}`] && (
+                          <p className="text-xs text-red-600 mt-1">{errors[`sizePrice-${index}`]}</p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        data-testid={`size-photo-btn-${index}`}
+                        onClick={() => pickVariantPhoto("size", index)}
+                        title={row.image ? "Change photo" : "Add photo"}
+                        className={`w-10 h-10 shrink-0 rounded-xl border flex items-center justify-center overflow-hidden transition-colors ${
+                          row.image
+                            ? "border-transparent"
+                            : "border-slate-200 text-slate-400 hover:border-kinetic-red hover:text-kinetic-red"
+                        }`}
+                      >
+                        {row.image ? (
+                          <img src={row.image} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <ImageIcon className="w-4 h-4" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        data-testid={`size-remove-${index}`}
+                        onClick={() => removeSizeRow(index)}
+                        className="w-10 h-10 shrink-0 rounded-xl border border-slate-200 text-slate-400 hover:bg-kinetic-red hover:text-white hover:border-kinetic-red flex items-center justify-center transition-colors"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {/* The two texts of the product box. */}
                 <div className="col-span-2 sm:col-span-1">
                   <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                    Flavors (comma-separated)
+                    What&apos;s inside
                   </label>
-                  <input
-                    data-testid="admin-product-flavors"
-                    value={form.flavors}
-                    onChange={(event) => setField("flavors", event.target.value)}
+                  <textarea
+                    data-testid="contents-input"
+                    value={form.contents}
+                    onChange={(event) => setField("contents", event.target.value)}
+                    rows={2}
                     className="w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors border-slate-200"
-                    placeholder="e.g. Smooth Vanilla, Dutch Cocoa"
+                    placeholder="e.g. 2 scoops, 1 shaker"
                   />
                 </div>
                 <div className="col-span-2 sm:col-span-1">
                   <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                    Weights (comma-separated)
+                    Nutrition
                   </label>
-                  <input
-                    data-testid="admin-product-weights"
-                    value={form.weights}
-                    onChange={(event) => setField("weights", event.target.value)}
+                  <textarea
+                    data-testid="nutrition-input"
+                    value={form.nutrition}
+                    onChange={(event) => setField("nutrition", event.target.value)}
+                    rows={2}
                     className="w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors border-slate-200"
-                    placeholder="e.g. 800 g, 2 kg"
+                    placeholder="e.g. 24 g protein per serving"
                   />
                 </div>
                 <div className="col-span-2 sm:col-span-1">
