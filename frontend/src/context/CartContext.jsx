@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
 import { API, formatApiError, inr } from "../lib/api";
+import { toast } from "sonner";
 
 const CartContext = createContext(null);
 export const useCart = () => useContext(CartContext);
@@ -105,6 +106,48 @@ export function CartProvider({ children }) {
 
   const removeCoupon = useCallback(() => setCoupon(null), []);
 
+  // The cart keeps what the buyer picked; when a sale starts or an admin
+  // edits prices, the stored prices of the lines stop being the truth. This
+  // refreshes them from the catalog and drops a line whose option vanished.
+  const refreshCartPrices = useCallback(async () => {
+    const ids = [...new Set(items.map((i) => i.product?.id).filter(Boolean))];
+    if (ids.length === 0) {
+      return;
+    }
+    const updates = new Map();
+    for (let i = 0; i < ids.length; i += 50) {
+      const chunk = ids.slice(i, i + 50);
+      try {
+        const { data } = await API.get("/products", { params: { ids: chunk.join(",") } });
+        const list = Array.isArray(data) ? data : [];
+        for (const product of list) {
+          updates.set(product.id, product);
+        }
+      } catch {
+        // One bad chunk leaves the rest of the cart on its stored price.
+      }
+    }
+    const next = [];
+    for (const item of items) {
+      const served = updates.get(item.product?.id);
+      // Fallback-shape lines (offline catalogue) carry no price maps: keep.
+      if (!served || served.sale_price == null) {
+        next.push(item);
+        continue;
+      }
+      const price =
+        served.size_prices?.[item.weight] ?? served.sale_price_effective ?? served.sale_price ?? item.product.price;
+      const flavorOk = !item.flavor || (served.flavors || []).includes(item.flavor);
+      const weightOk = !item.weight || (served.weight_options || []).includes(item.weight);
+      if (!flavorOk || !weightOk) {
+        toast.warning(`${item.product.name}: an option is no longer available`);
+        continue;
+      }
+      next.push({ ...item, product: { ...item.product, price } });
+    }
+    setItems(next);
+  }, [items]);
+
   const discount = coupon ? Math.min(coupon.discount, subtotal) : 0;
   const gst = items.length ? Math.round((subtotal - discount) * 0.05) : 0;
   const shipping = !items.length ? 0 : subtotal - discount >= FREE_SHIP_PAISE ? 0 : SHIPPING_PAISE;
@@ -122,6 +165,7 @@ export function CartProvider({ children }) {
       coupon,
       applyCoupon,
       removeCoupon,
+      refreshCartPrices,
       subtotal,
       discount,
       gst,
@@ -129,7 +173,23 @@ export function CartProvider({ children }) {
       total,
       count: items.reduce((s, i) => s + i.qty, 0),
     }),
-    [items, cartOpen, coupon, addItem, setQty, removeItem, clearCart, applyCoupon, removeCoupon, subtotal, discount, gst, shipping, total]
+    [
+      items,
+      cartOpen,
+      coupon,
+      addItem,
+      setQty,
+      removeItem,
+      clearCart,
+      applyCoupon,
+      removeCoupon,
+      refreshCartPrices,
+      subtotal,
+      discount,
+      gst,
+      shipping,
+      total,
+    ]
   );
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;

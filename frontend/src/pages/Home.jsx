@@ -6,6 +6,7 @@ import Hero from "../components/Hero";
 import Marquee from "../components/Marquee";
 import Categories from "../components/Categories";
 import NewArrivals from "../components/NewArrivals";
+import SaleSection from "../components/SaleSection";
 import ShopSection from "../components/ShopSection";
 import Footer from "../components/Footer";
 import CartDrawer from "../components/CartDrawer";
@@ -38,6 +39,7 @@ export default function Home() {
         <Marquee />
         <Categories categories={categories} activeCategory={activeCategory} onNavCategory={onNavCategory} />
         <NewArrivals />
+        <SaleSection />
         <ShopSection categories={categories} activeCategory={activeCategory} onNavCategory={onNavCategory} />
       </main>
       <Footer categories={categories} onNavCategory={onNavCategory} />

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { X, MapPin, CreditCard, Banknote, Smartphone, Loader2, CheckCircle2, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
@@ -13,7 +13,7 @@ const PAYMENT_METHODS = [
 ];
 
 export default function CheckoutModal({ open, onClose }) {
-  const { items, coupon, subtotal, discount, gst, shipping, total, clearCart, setCartOpen } = useCart();
+  const { items, coupon, subtotal, discount, gst, shipping, total, clearCart, setCartOpen, refreshCartPrices } = useCart();
   const [step, setStep] = useState(1);
   const [payment, setPayment] = useState("cod");
   const [placing, setPlacing] = useState(false);
@@ -22,6 +22,14 @@ export default function CheckoutModal({ open, onClose }) {
   const [errors, setErrors] = useState({});
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  // Sale-driven price refreshes land here so the checkout shows current prices.
+  useEffect(() => {
+    if (open) {
+      refreshCartPrices();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const validate = () => {
     const errs = {};
