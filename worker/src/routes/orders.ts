@@ -19,6 +19,7 @@ import { orderPlacedEmail } from "../lib/email-templates";
 import { readJsonBody } from "../lib/http";
 import type { CouponRow, PricedItem } from "../lib/pricing";
 import { couponApplies, couponDiscount, priceOrder } from "../lib/pricing";
+import { effectiveVariantPrice, parseOptionMaps, type SaleProductColumns } from "../lib/sale";
 import { getOptionalUser, requireAuth } from "../middleware/auth";
 
 type OrdersEnv = { Bindings: Env };
@@ -70,10 +71,9 @@ const NOT_AUTHENTICATED = "Not authenticated";
 const PAYMENT_METHODS = new Set(["cod", "upi", "card"]);
 
 /** A product of the cart, as the database has it. */
-interface ProductRow {
+interface ProductRow extends SaleProductColumns {
   id: string;
   name: string;
-  sale_price: number;
   stock: number;
   is_active: number;
 }
@@ -423,7 +423,9 @@ ordersRoutes.post("/orders", async (c: OrdersContext) => {
   const placeholders = wanted.map(() => "?").join(", ");
   const { results: productRows } = await c.env.DB
     .prepare(
-      `SELECT id, name, sale_price, stock, is_active
+      `SELECT id, name, sale_price, stock, is_active,
+              weight_options, weight_prices, sale_percentage, sale_price_override,
+              sale_overrides, sale_starts_at, sale_ends_at
        FROM products WHERE id IN (${placeholders})`,
     )
     .bind(...wanted)
@@ -444,7 +446,11 @@ ordersRoutes.post("/orders", async (c: OrdersContext) => {
       priced: {
         product_id: item.product_id,
         name: product.name,
-        unit_price: product.sale_price,
+        // The line's price is the price of the size it carries: the exact
+        // override of that size when one is set, the percentage off the
+        // size's own regular price otherwise — or the regular price when no
+        // sale is running. Never the price the client claimed.
+        unit_price: effectiveVariantPrice(product, parseOptionMaps(product), item.weight, new Date()),
         qty: item.qty,
         flavor: item.flavor,
         weight: item.weight,

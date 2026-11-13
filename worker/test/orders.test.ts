@@ -73,6 +73,14 @@ interface ProductFixture {
   slug: string;
   salePrice: number;
   stock: number;
+  /** The variant and sale columns; a fixture that omits them stores nulls. */
+  weightOptions?: string[];
+  weightPrices?: Record<string, number>;
+  salePercentage?: number;
+  salePriceOverride?: number;
+  saleOverrides?: Record<string, number>;
+  saleStartsAt?: string;
+  saleEndsAt?: string;
 }
 
 /** A coupon of the fixture; `minOrder` is in paise. */
@@ -91,8 +99,11 @@ async function insertProduct(product: ProductFixture): Promise<void> {
       `INSERT INTO products
          (id, name, slug, brand, category_id, mrp, sale_price, discount_percent,
           stock, images, flavors, weight_options, badge, is_new_arrival,
-          is_active, rating, orders_count, created_at)
-       VALUES (?, ?, ?, 'Kinetic', NULL, ?, ?, 0, ?, '[]', '[]', '[]', NULL, 0, 1, 4.5, 0, '2026-01-05 10:00:00')`,
+          is_active, rating, orders_count, created_at,
+          weight_prices, sale_percentage, sale_price_override, sale_overrides,
+          sale_starts_at, sale_ends_at)
+       VALUES (?, ?, ?, 'Kinetic', NULL, ?, ?, 0, ?, '[]', '[]', ?, NULL, 0, 1, 4.5, 0, '2026-01-05 10:00:00',
+               ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       product.id,
@@ -101,6 +112,13 @@ async function insertProduct(product: ProductFixture): Promise<void> {
       product.salePrice,
       product.salePrice,
       product.stock,
+      JSON.stringify(product.weightOptions ?? []),
+      product.weightPrices ? JSON.stringify(product.weightPrices) : null,
+      product.salePercentage ?? 0,
+      product.salePriceOverride ?? null,
+      product.saleOverrides ? JSON.stringify(product.saleOverrides) : null,
+      product.saleStartsAt ?? null,
+      product.saleEndsAt ?? null,
     )
     .run();
 }
@@ -1107,5 +1125,181 @@ describe("order routes", () => {
       expect(res.status).toBe(404);
       expect(await res.json()).toEqual({ detail: "Order not found" });
     });
+  });
+});
+
+/**
+ * The per-variant pricing of the order lines: the server prices every line
+ * by the size the line carries, off the product's own price maps and sale —
+ * never off what the client claims.
+ */
+describe("order lines with variant pricing", () => {
+  const PROD_VAR = "prod_var_priced";
+  const PROD_VAR_SALE = "prod_var_sale";
+  const PROD_VAR_OVERRIDE = "prod_var_override";
+  const PROD_VAR_EXPIRED = "prod_var_expired";
+  const PROD_SIZELESS = "prod_var_sizeless";
+
+  const STARTS = new Date(Date.now() - 86_400_000).toISOString();
+  const ENDS = new Date(Date.now() + 7 * 86_400_000).toISOString();
+  const ENDED = new Date(Date.now() - 3_600_000).toISOString();
+
+  /** The lines of a created order, as the database has them. */
+  async function readLines(orderId: string) {
+    const { results } = await db
+      .prepare(
+        "SELECT product_id, unit_price, qty, flavor, weight FROM order_items WHERE order_id = ? ORDER BY product_id",
+      )
+      .bind(orderId)
+      .all<{ product_id: string | null; unit_price: number; qty: number; weight: string | null }>();
+    return results;
+  }
+
+  beforeAll(async () => {
+    // A sized product with no sale: "2 kg" has its own price, "800 g" does not.
+    await insertProduct({
+      id: PROD_VAR,
+      name: "Variant Priced Whey",
+      slug: "variant-priced-whey",
+      salePrice: 249_900,
+      stock: 50,
+      weightOptions: ["2 kg", "800 g"],
+      weightPrices: { "2 kg": 199_900 },
+    });
+
+    // The same shape, on an active 20% sale.
+    await insertProduct({
+      id: PROD_VAR_SALE,
+      name: "Variant Sale Whey",
+      slug: "variant-sale-whey",
+      salePrice: 249_900,
+      stock: 50,
+      weightOptions: ["2 kg", "800 g"],
+      weightPrices: { "2 kg": 199_900 },
+      salePercentage: 20,
+      saleStartsAt: STARTS,
+      saleEndsAt: ENDS,
+    });
+
+    // A sized product whose "2 kg" carries an exact sale override.
+    await insertProduct({
+      id: PROD_VAR_OVERRIDE,
+      name: "Variant Override Whey",
+      slug: "variant-override-whey",
+      salePrice: 249_900,
+      stock: 50,
+      weightOptions: ["2 kg", "800 g"],
+      weightPrices: { "2 kg": 199_900 },
+      salePercentage: 20,
+      saleOverrides: { "2 kg": 149_900 },
+      saleStartsAt: STARTS,
+      saleEndsAt: ENDS,
+    });
+
+    // A sized product whose sale window has already closed.
+    await insertProduct({
+      id: PROD_VAR_EXPIRED,
+      name: "Variant Expired Whey",
+      slug: "variant-expired-whey",
+      salePrice: 249_900,
+      stock: 50,
+      weightOptions: ["2 kg", "800 g"],
+      weightPrices: { "2 kg": 199_900 },
+      salePercentage: 20,
+      saleStartsAt: "2026-01-01T00:00:00.000Z",
+      saleEndsAt: ENDED,
+    });
+
+    // A sizeless product with an exact base override.
+    await insertProduct({
+      id: PROD_SIZELESS,
+      name: "Sizeless Override Whey",
+      slug: "sizeless-override-whey",
+      salePrice: 99_900,
+      stock: 50,
+      salePriceOverride: 79_900,
+      saleStartsAt: STARTS,
+      saleEndsAt: ENDS,
+    });
+  });
+
+  it("prices a line by the size it carries", async () => {
+    const res = await post("/api/orders", {
+      items: [
+        { product_id: PROD_VAR, qty: 1, flavor: null, weight: "2 kg" },
+        { product_id: PROD_VAR, qty: 1, flavor: null, weight: "800 g" },
+      ],
+      coupon_code: null,
+      shipping: SHIPPING,
+      payment_method: "cod",
+    });
+    const body = (await res.json()) as { order_id: string };
+
+    const lines = await readLines(body.order_id);
+    expect(lines.map((line) => line.unit_price)).toEqual([199_900, 249_900]);
+    expect((await readOrder(body.order_id))?.subtotal).toBe(449_800);
+  });
+
+  it("takes the percentage off each size's own regular price", async () => {
+    const res = await post("/api/orders", {
+      items: [
+        { product_id: PROD_VAR_SALE, qty: 1, flavor: null, weight: "2 kg" },
+        { product_id: PROD_VAR_SALE, qty: 1, flavor: null, weight: "800 g" },
+      ],
+      coupon_code: null,
+      shipping: SHIPPING,
+      payment_method: "cod",
+    });
+    const body = (await res.json()) as { order_id: string };
+
+    const lines = await readLines(body.order_id);
+    expect(lines.map((line) => line.unit_price)).toEqual([159_920, 199_920]);
+    expect((await readOrder(body.order_id))?.subtotal).toBe(359_840);
+  });
+
+  it("lets a per-size override beat the percentage for that size", async () => {
+    const res = await post("/api/orders", {
+      items: [
+        { product_id: PROD_VAR_OVERRIDE, qty: 1, flavor: null, weight: "2 kg" },
+        { product_id: PROD_VAR_OVERRIDE, qty: 1, flavor: null, weight: "800 g" },
+      ],
+      coupon_code: null,
+      shipping: SHIPPING,
+      payment_method: "cod",
+    });
+    const body = (await res.json()) as { order_id: string };
+
+    const lines = await readLines(body.order_id);
+    expect(lines.map((line) => line.unit_price)).toEqual([149_900, 199_920]);
+  });
+
+  it("prices every size at its regular price once the sale has expired", async () => {
+    const res = await post("/api/orders", {
+      items: [
+        { product_id: PROD_VAR_EXPIRED, qty: 1, flavor: null, weight: "2 kg" },
+        { product_id: PROD_VAR_EXPIRED, qty: 1, flavor: null, weight: "800 g" },
+      ],
+      coupon_code: null,
+      shipping: SHIPPING,
+      payment_method: "cod",
+    });
+    const body = (await res.json()) as { order_id: string };
+
+    const lines = await readLines(body.order_id);
+    expect(lines.map((line) => line.unit_price)).toEqual([199_900, 249_900]);
+  });
+
+  it("prices a sizeless line at the exact base override", async () => {
+    const res = await post("/api/orders", {
+      items: [{ product_id: PROD_SIZELESS, qty: 1, flavor: null, weight: null }],
+      coupon_code: null,
+      shipping: SHIPPING,
+      payment_method: "cod",
+    });
+    const body = (await res.json()) as { order_id: string };
+
+    const lines = await readLines(body.order_id);
+    expect(lines.map((line) => line.unit_price)).toEqual([79_900]);
+    expect((await readOrder(body.order_id))?.subtotal).toBe(79_900);
   });
 });
