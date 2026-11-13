@@ -32,6 +32,7 @@ interface ProductRow {
   images: string;
   flavors: string;
   weight_options: string;
+  weight_prices: string | null;
 }
 
 /** A product, as the API serves it. */
@@ -55,6 +56,16 @@ interface ProductJson {
   is_new_arrival: number;
   is_active: number;
   created_at: string;
+  flavor_images: Record<string, string>;
+  weight_images: Record<string, string>;
+  weight_prices: Record<string, number>;
+  sale_overrides: Record<string, number>;
+  contents: string | null;
+  nutrition: string | null;
+  sale_percentage: number;
+  sale_price_override: number | null;
+  sale_starts_at: string | null;
+  sale_ends_at: string | null;
 }
 
 /** An access token of an admin. */
@@ -117,7 +128,7 @@ async function readRow(id: string): Promise<ProductRow | null> {
   return db
     .prepare(
       `SELECT id, name, slug, mrp, sale_price, discount_percent, stock, badge,
-              is_active, images, flavors, weight_options
+              is_active, images, flavors, weight_options, weight_prices
        FROM products WHERE id = ?`,
     )
     .bind(id)
@@ -477,5 +488,197 @@ describe("admin products", () => {
 
       expect(res.status).toBe(403);
     });
+  });
+});
+
+/**
+ * The variant and sale fields of a product: what the admin sends is what the
+ * API serves back, the stale keys of a shrunk option list are pruned, and
+ * every broken value is refused.
+ */
+describe("admin product variant and sale fields", () => {
+  /** The window of an active sale for the fixtures. */
+  const STARTS = new Date(Date.now() - 86_400_000).toISOString();
+  const ENDS = new Date(Date.now() + 7 * 86_400_000).toISOString();
+
+  it("creates a product with variant and sale fields and serves them back", async () => {
+    const product = await createProduct({
+      name: "Kinetic Variant Whey",
+      flavor_images: { "Rich Chocolate": "/api/images/products/choc.png" },
+      weight_images: { "1 kg": "/api/images/products/1kg.png" },
+      weight_prices: { "1 kg": 299_900, "2 kg": 549_900 },
+      sale_overrides: { "2 kg": 449_900 },
+      contents: "One scoop and a shaker",
+      nutrition: "24 g protein per serving",
+      sale_percentage: 20,
+      sale_price_override: 199_900,
+      sale_starts_at: STARTS,
+      sale_ends_at: ENDS,
+    });
+
+    expect(product.flavor_images).toEqual({ "Rich Chocolate": "/api/images/products/choc.png" });
+    expect(product.weight_images).toEqual({ "1 kg": "/api/images/products/1kg.png" });
+    expect(product.weight_prices).toEqual({ "1 kg": 299_900, "2 kg": 549_900 });
+    expect(product.sale_overrides).toEqual({ "2 kg": 449_900 });
+    expect(product.contents).toBe("One scoop and a shaker");
+    expect(product.nutrition).toBe("24 g protein per serving");
+    expect(product.sale_percentage).toBe(20);
+    expect(product.sale_price_override).toBe(199_900);
+    expect(product.sale_starts_at).toBe(STARTS);
+    expect(product.sale_ends_at).toBe(ENDS);
+
+    // The row of the database carries the same maps, as JSON.
+    const row = await readRow(product.id);
+    expect(JSON.parse(row?.weight_prices ?? "{}")).toEqual({ "1 kg": 299_900, "2 kg": 549_900 });
+  });
+
+  it("creates a product without any of the new fields", async () => {
+    const product = await createProduct({ name: "Kinetic Plain Whey" });
+
+    expect(product.flavor_images).toEqual({});
+    expect(product.weight_prices).toEqual({});
+    expect(product.contents).toBeNull();
+    expect(product.sale_percentage).toBe(0);
+    expect(product.sale_price_override).toBeNull();
+    expect(product.sale_starts_at).toBeNull();
+  });
+
+  it("prunes stale map keys when PATCH shrinks the weight options", async () => {
+    const product = await createProduct({
+      name: "Kinetic Shrinking Whey",
+      weight_prices: { "1 kg": 299_900, "2 kg": 549_900 },
+      sale_overrides: { "2 kg": 449_900 },
+    });
+
+    const res = await call("PATCH", `/api/admin/products/${product.id}`, {
+      body: { weight_options: ["1 kg"] },
+      token: await adminToken(),
+    });
+    expect(res.status).toBe(200);
+    const updated = (await res.json()) as ProductJson;
+
+    expect(updated.weight_options).toEqual(["1 kg"]);
+    // "2 kg" is no longer an option of the product: its keys are gone.
+    expect(updated.weight_prices).toEqual({ "1 kg": 299_900 });
+    expect(updated.sale_overrides).toEqual({});
+  });
+
+  it("edits the sale fields of a single product with PATCH", async () => {
+    const product = await createProduct({ name: "Kinetic Sale Edit Whey" });
+
+    const res = await call("PATCH", `/api/admin/products/${product.id}`, {
+      body: {
+        sale_percentage: 30,
+        sale_starts_at: STARTS,
+        sale_ends_at: ENDS,
+      },
+      token: await adminToken(),
+    });
+    expect(res.status).toBe(200);
+    const updated = (await res.json()) as ProductJson;
+
+    expect(updated.sale_percentage).toBe(30);
+    expect(updated.sale_starts_at).toBe(STARTS);
+    expect(updated.sale_ends_at).toBe(ENDS);
+  });
+
+  it("refuses a sale percentage above 90 or fractional", async () => {
+    for (const sale_percentage of [91, 1.5, -5]) {
+      const res = await call("POST", "/api/admin/products", {
+        body: productBody({ name: `Kinetic Pct ${sale_percentage}`, sale_percentage }),
+        token: await adminToken(),
+      });
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it("accepts a sale percentage of 0 (no percentage)", async () => {
+    const product = await createProduct({
+      name: "Kinetic Zero Pct Whey",
+      sale_percentage: 0,
+    });
+
+    expect(product.sale_percentage).toBe(0);
+  });
+
+  it("refuses a window that ends before it starts", async () => {
+    const res = await call("POST", "/api/admin/products", {
+      body: productBody({
+        name: "Kinetic Backwards Window",
+        sale_starts_at: ENDS,
+        sale_ends_at: STARTS,
+      }),
+      token: await adminToken(),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("refuses a window with only one timestamp", async () => {
+    const res = await call("POST", "/api/admin/products", {
+      body: productBody({ name: "Kinetic Half Window", sale_starts_at: STARTS }),
+      token: await adminToken(),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("refuses an unparseable timestamp", async () => {
+    const res = await call("POST", "/api/admin/products", {
+      body: productBody({
+        name: "Kinetic Garbage Window",
+        sale_starts_at: "not-a-date",
+        sale_ends_at: ENDS,
+      }),
+      token: await adminToken(),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("refuses a base override at or above the base price", async () => {
+    for (const sale_price_override of [299_900, 300_000]) {
+      const res = await call("POST", "/api/admin/products", {
+        body: productBody({
+          name: `Kinetic Override ${sale_price_override}`,
+          sale_price_override,
+          sale_starts_at: STARTS,
+          sale_ends_at: ENDS,
+        }),
+        token: await adminToken(),
+      });
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it("refuses a money-map key that is not a weight option", async () => {
+    const res = await call("POST", "/api/admin/products", {
+      body: productBody({
+        name: "Kinetic Stale Key Whey",
+        weight_prices: { "1 kg": 299_900, "9 L": 123_456 },
+      }),
+      token: await adminToken(),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("refuses a price-map value that is not a positive whole paise amount", async () => {
+    for (const weight_prices of [{ "1 kg": 0 }, { "1 kg": -5 }, { "1 kg": 199.5 }, { "1 kg": "x" }]) {
+      const res = await call("POST", "/api/admin/products", {
+        body: productBody({ name: `Kinetic Bad Map ${JSON.stringify(weight_prices)}`, weight_prices }),
+        token: await adminToken(),
+      });
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it("refuses an image-map value outside /api/images/", async () => {
+    for (const bad of ["https://evil.example.com/x.png", "javascript:alert(1)", "/api/images"]) {
+      const res = await call("POST", "/api/admin/products", {
+        body: productBody({
+          name: `Kinetic Bad Image ${bad.slice(0, 8)}`,
+          weight_images: { "1 kg": bad },
+        }),
+        token: await adminToken(),
+      });
+      expect(res.status).toBe(400);
+    }
   });
 });

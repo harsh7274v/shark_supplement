@@ -30,6 +30,7 @@ import { sendMail } from "../lib/email";
 import { orderStatusEmail } from "../lib/email-templates";
 import { readJsonBody } from "../lib/http";
 import { discountPercent } from "../lib/money";
+import { parseOptionMaps } from "../lib/sale";
 import { requireAdmin } from "../middleware/auth";
 import { adminCategoryRoutes } from "./admin.categories";
 
@@ -72,6 +73,25 @@ const CATEGORY_NOT_FOUND = "Category not found";
 
 /** The message of a category id that is not a text. */
 const BAD_CATEGORY_ID = "Category id must be a text";
+
+/** The message of an image map whose values are not storefront paths. */
+const BAD_IMAGE_MAP = "Image maps must map every key to an /api/images/ path";
+
+/** The message of a variant price map whose values are not money. */
+const BAD_MONEY_MAP = "Variant prices must be positive whole paise amounts";
+
+/** The message of a variant map whose keys the product does not carry. */
+const BAD_VARIANT_KEY = "Variant maps may only use the weight options of the product";
+
+/** The message of a sale percentage that is not a whole 0–90. */
+const BAD_SALE_PCT = "Sale percentage must be a whole number between 0 and 90";
+
+/** The message of a base override that is not below the sale price. */
+const BAD_SALE_OVERRIDE =
+  "Sale override must be a positive whole paise amount below the sale price";
+
+/** The message of a sale window that is one-sided, unparseable or backwards. */
+const BAD_SALE_WINDOW = "Sale window needs a start and a later end";
 
 /** The message of a product that is not there. */
 const PRODUCT_NOT_FOUND = "Product not found";
@@ -116,6 +136,16 @@ const PRODUCT_COLUMNS = `
   p.images,
   p.flavors,
   p.weight_options,
+  p.flavor_images,
+  p.weight_images,
+  p.weight_prices,
+  p.contents,
+  p.nutrition,
+  p.sale_percentage,
+  p.sale_price_override,
+  p.sale_overrides,
+  p.sale_starts_at,
+  p.sale_ends_at,
   p.badge,
   p.is_new_arrival,
   p.is_active,
@@ -140,6 +170,16 @@ interface ProductRow {
   images: string | null;
   flavors: string | null;
   weight_options: string | null;
+  flavor_images: string | null;
+  weight_images: string | null;
+  weight_prices: string | null;
+  contents: string | null;
+  nutrition: string | null;
+  sale_percentage: number;
+  sale_price_override: number | null;
+  sale_overrides: string | null;
+  sale_starts_at: string | null;
+  sale_ends_at: string | null;
   badge: string | null;
   is_new_arrival: number;
   is_active: number;
@@ -169,6 +209,8 @@ function parseArray(value: string | null): string[] {
 
 /** Turns a product row into the JSON the API serves. */
 function toProduct(row: ProductRow) {
+  const maps = parseOptionMaps(row);
+
   return {
     id: row.id,
     name: row.name,
@@ -185,6 +227,16 @@ function toProduct(row: ProductRow) {
     images: parseArray(row.images),
     flavors: parseArray(row.flavors),
     weight_options: parseArray(row.weight_options),
+    flavor_images: parseImageMap(row.flavor_images),
+    weight_images: parseImageMap(row.weight_images),
+    weight_prices: maps.weightPrices,
+    sale_overrides: maps.saleOverrides,
+    contents: row.contents,
+    nutrition: row.nutrition,
+    sale_percentage: row.sale_percentage,
+    sale_price_override: row.sale_price_override,
+    sale_starts_at: row.sale_starts_at,
+    sale_ends_at: row.sale_ends_at,
     badge: row.badge,
     is_new_arrival: row.is_new_arrival,
     is_active: row.is_active,
@@ -200,6 +252,14 @@ function readMoney(value: unknown): number | null {
     return null;
   }
   return Math.round(value);
+}
+
+/** Reads a positive whole number of a body. A broken one reads as `null`. */
+function readPositiveInt(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+    return null;
+  }
+  return value;
 }
 
 /** Reads the stock of a body: whole pieces. A missing one reads as zero. */
@@ -236,6 +296,148 @@ function readStringList(value: unknown): string[] | null {
     return null;
   }
   return value as string[];
+}
+
+/**
+ * Parses a JSON image-map column of the products table: an object whose
+ * values are strings. A column that is not one reads as an empty map.
+ */
+function parseImageMap(value: string | null): Record<string, string> {
+  if (!value) {
+    return {};
+  }
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return {};
+    }
+    const out: Record<string, string> = {};
+    for (const [key, val] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof val === "string") {
+        out[key] = val;
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Reads an image map of a body: keys → "/api/images/…" paths, the only URLs
+ * the storefront serves. A missing one reads as an empty map; a broken one
+ * reads as `null`, which the caller refuses.
+ */
+function readImageMap(value: unknown): Record<string, string> | null {
+  if (value === undefined || value === null) {
+    return {};
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const out: Record<string, string> = {};
+  for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof val !== "string" || !val.startsWith("/api/images/")) {
+      return null;
+    }
+    out[key] = val;
+  }
+  return out;
+}
+
+/**
+ * Reads a money map of a body: keys → positive whole paise amounts. A
+ * missing one reads as an empty map; a broken one reads as `null`.
+ */
+function readMoneyMap(value: unknown): Record<string, number> | null {
+  if (value === undefined || value === null) {
+    return {};
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const out: Record<string, number> = {};
+  for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof val !== "number" || !Number.isInteger(val) || val <= 0) {
+      return null;
+    }
+    out[key] = val;
+  }
+  return out;
+}
+
+/**
+ * Reads the sale percentage of a body: a whole number between 0 and 90. A
+ * missing one reads as 0 — the product carries no percentage; a broken one
+ * reads as `null`.
+ */
+function readSalePercentage(value: unknown): number | null {
+  if (value === undefined || value === null) {
+    return 0;
+  }
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 90) {
+    return null;
+  }
+  return value;
+}
+
+/**
+ * Reads the sale window of a body: both timestamps or neither, both
+ * parseable, the end strictly after the start. A missing pair reads as no
+ * window; a broken pair reads as `null`.
+ */
+function readSaleWindow(
+  startsRaw: unknown,
+  endsRaw: unknown,
+): { startsAt: string; endsAt: string } | { startsAt: null; endsAt: null } | null {
+  const hasStarts = startsRaw !== undefined && startsRaw !== null;
+  const hasEnds = endsRaw !== undefined && endsRaw !== null;
+  if (!hasStarts && !hasEnds) {
+    return { startsAt: null, endsAt: null };
+  }
+  if (hasStarts !== hasEnds) {
+    return null;
+  }
+  if (typeof startsRaw !== "string" || typeof endsRaw !== "string") {
+    return null;
+  }
+  const starts = Date.parse(startsRaw);
+  const ends = Date.parse(endsRaw);
+  if (!Number.isFinite(starts) || !Number.isFinite(ends) || ends <= starts) {
+    return null;
+  }
+  return { startsAt: startsRaw, endsAt: endsRaw };
+}
+
+/**
+ * Prunes the keys of a stored money-map column that the option list of the
+ * product no longer carries: when an admin shrinks `weight_options`, the
+ * prices of the dropped sizes simply go away.
+ */
+function pruneStoredMap(value: string | null, options: string[]): string | null {
+  if (!value) {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return null;
+    }
+    const out: Record<string, number> = {};
+    for (const [key, val] of Object.entries(parsed as Record<string, unknown>)) {
+      if (
+        options.includes(key) &&
+        typeof val === "number" &&
+        Number.isInteger(val) &&
+        val > 0
+      ) {
+        out[key] = val;
+      }
+    }
+    return Object.keys(out).length > 0 ? JSON.stringify(out) : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Reads the badge of a body. A missing one reads as no badge at all. */
@@ -384,6 +586,54 @@ adminRoutes.post("/products", async (c: AdminContext) => {
     return c.json({ detail: listMessage("Weight options") }, 400);
   }
 
+  // The variant maps: images keyed by label, prices keyed by weight option.
+  const flavorImages = readImageMap(body.flavor_images);
+  if (flavorImages === null) {
+    return c.json({ detail: BAD_IMAGE_MAP }, 400);
+  }
+  const weightImages = readImageMap(body.weight_images);
+  if (weightImages === null) {
+    return c.json({ detail: BAD_IMAGE_MAP }, 400);
+  }
+  const weightPrices = readMoneyMap(body.weight_prices);
+  if (weightPrices === null) {
+    return c.json({ detail: BAD_MONEY_MAP }, 400);
+  }
+  const saleOverrides = readMoneyMap(body.sale_overrides);
+  if (saleOverrides === null) {
+    return c.json({ detail: BAD_MONEY_MAP }, 400);
+  }
+  for (const key of [...Object.keys(weightPrices), ...Object.keys(saleOverrides)]) {
+    if (!weightOptions.includes(key)) {
+      return c.json({ detail: BAD_VARIANT_KEY }, 400);
+    }
+  }
+
+  // The detail texts the product box shows.
+  const contents = body.contents === undefined ? null : readText(body.contents);
+  const nutrition = body.nutrition === undefined ? null : readText(body.nutrition);
+
+  // The sale of the product: a percentage, an exact base override and a
+  // window that has to make sense.
+  const salePercentage = readSalePercentage(body.sale_percentage);
+  if (salePercentage === null) {
+    return c.json({ detail: BAD_SALE_PCT }, 400);
+  }
+
+  let salePriceOverride: number | null = null;
+  if (body.sale_price_override !== undefined && body.sale_price_override !== null) {
+    const given = readPositiveInt(body.sale_price_override);
+    if (given === null || given >= salePrice) {
+      return c.json({ detail: BAD_SALE_OVERRIDE }, 400);
+    }
+    salePriceOverride = given;
+  }
+
+  const window = readSaleWindow(body.sale_starts_at, body.sale_ends_at);
+  if (window === null) {
+    return c.json({ detail: BAD_SALE_WINDOW }, 400);
+  }
+
   const badge = readBadge(body.badge);
   if (badge === null) {
     return c.json({ detail: BAD_BADGE }, 400);
@@ -415,9 +665,11 @@ adminRoutes.post("/products", async (c: AdminContext) => {
   try {
     await c.env.DB.prepare(
       `INSERT INTO products (id, name, slug, description, brand, category_id, mrp, sale_price,
-                             discount_percent, stock, images, flavors, weight_options, badge,
-                             is_new_arrival, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                             discount_percent, stock, images, flavors, weight_options,
+                             flavor_images, weight_images, weight_prices, contents, nutrition,
+                             sale_percentage, sale_price_override, sale_overrides,
+                             sale_starts_at, sale_ends_at, badge, is_new_arrival, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
         id,
@@ -433,6 +685,16 @@ adminRoutes.post("/products", async (c: AdminContext) => {
         JSON.stringify(images),
         JSON.stringify(flavors),
         JSON.stringify(weightOptions),
+        Object.keys(flavorImages).length > 0 ? JSON.stringify(flavorImages) : null,
+        Object.keys(weightImages).length > 0 ? JSON.stringify(weightImages) : null,
+        Object.keys(weightPrices).length > 0 ? JSON.stringify(weightPrices) : null,
+        contents,
+        nutrition,
+        salePercentage,
+        salePriceOverride,
+        Object.keys(saleOverrides).length > 0 ? JSON.stringify(saleOverrides) : null,
+        window.startsAt,
+        window.endsAt,
         badge,
         isNewArrival,
         isActive,
@@ -592,12 +854,115 @@ adminRoutes.patch("/products/:id", async (c: AdminContext) => {
     }
   }
 
+  // The variant maps. The keys of a price map have to be options the
+  // product actually keeps — the options being saved by this very request.
+  const weightOptionList = parseArray(weightOptions);
+
+  let flavorImages = current.flavor_images;
+  if (body.flavor_images !== undefined) {
+    const given = readImageMap(body.flavor_images);
+    if (given === null) {
+      return c.json({ detail: BAD_IMAGE_MAP }, 400);
+    }
+    flavorImages = Object.keys(given).length > 0 ? JSON.stringify(given) : null;
+  }
+
+  let weightImages = current.weight_images;
+  if (body.weight_images !== undefined) {
+    const given = readImageMap(body.weight_images);
+    if (given === null) {
+      return c.json({ detail: BAD_IMAGE_MAP }, 400);
+    }
+    weightImages = Object.keys(given).length > 0 ? JSON.stringify(given) : null;
+  }
+
+  let weightPrices = current.weight_prices;
+  if (body.weight_prices !== undefined) {
+    const given = readMoneyMap(body.weight_prices);
+    if (given === null) {
+      return c.json({ detail: BAD_MONEY_MAP }, 400);
+    }
+    for (const key of Object.keys(given)) {
+      if (!weightOptionList.includes(key)) {
+        return c.json({ detail: BAD_VARIANT_KEY }, 400);
+      }
+    }
+    weightPrices = Object.keys(given).length > 0 ? JSON.stringify(given) : null;
+  }
+
+  let saleOverrides = current.sale_overrides;
+  if (body.sale_overrides !== undefined) {
+    const given = readMoneyMap(body.sale_overrides);
+    if (given === null) {
+      return c.json({ detail: BAD_MONEY_MAP }, 400);
+    }
+    for (const key of Object.keys(given)) {
+      if (!weightOptionList.includes(key)) {
+        return c.json({ detail: BAD_VARIANT_KEY }, 400);
+      }
+    }
+    saleOverrides = Object.keys(given).length > 0 ? JSON.stringify(given) : null;
+  }
+
+  // When the options of this request lost a size, the prices and sale
+  // overrides of that size are gone with it.
+  weightPrices = pruneStoredMap(weightPrices, weightOptionList);
+  saleOverrides = pruneStoredMap(saleOverrides, weightOptionList);
+
+  let contents = current.contents;
+  if (body.contents !== undefined) {
+    contents = readText(body.contents);
+  }
+
+  let nutrition = current.nutrition;
+  if (body.nutrition !== undefined) {
+    nutrition = readText(body.nutrition);
+  }
+
+  // The sale of the product. The base override has to stay below the base
+  // price being saved by this very request.
+  let salePercentage = current.sale_percentage;
+  if (body.sale_percentage !== undefined) {
+    const given = readSalePercentage(body.sale_percentage);
+    if (given === null) {
+      return c.json({ detail: BAD_SALE_PCT }, 400);
+    }
+    salePercentage = given;
+  }
+
+  let salePriceOverride = current.sale_price_override;
+  if (body.sale_price_override !== undefined) {
+    if (body.sale_price_override === null) {
+      salePriceOverride = null;
+    } else {
+      const given = readPositiveInt(body.sale_price_override);
+      if (given === null || given >= salePrice) {
+        return c.json({ detail: BAD_SALE_OVERRIDE }, 400);
+      }
+      salePriceOverride = given;
+    }
+  }
+
+  let saleStartsAt = current.sale_starts_at;
+  let saleEndsAt = current.sale_ends_at;
+  if (body.sale_starts_at !== undefined || body.sale_ends_at !== undefined) {
+    const given = readSaleWindow(body.sale_starts_at, body.sale_ends_at);
+    if (given === null) {
+      return c.json({ detail: BAD_SALE_WINDOW }, 400);
+    }
+    saleStartsAt = given.startsAt;
+    saleEndsAt = given.endsAt;
+  }
+
   try {
     await c.env.DB.prepare(
       `UPDATE products SET name = ?, slug = ?, description = ?, brand = ?, category_id = ?,
                            mrp = ?, sale_price = ?, discount_percent = ?, stock = ?, images = ?,
-                           flavors = ?, weight_options = ?, badge = ?, is_new_arrival = ?,
-                           is_active = ?
+                           flavors = ?, weight_options = ?, flavor_images = ?, weight_images = ?,
+                           weight_prices = ?, contents = ?, nutrition = ?,
+                           sale_percentage = ?, sale_price_override = ?, sale_overrides = ?,
+                           sale_starts_at = ?, sale_ends_at = ?,
+                           badge = ?, is_new_arrival = ?, is_active = ?
        WHERE id = ?`,
     )
       .bind(
@@ -613,6 +978,16 @@ adminRoutes.patch("/products/:id", async (c: AdminContext) => {
         images,
         flavors,
         weightOptions,
+        flavorImages,
+        weightImages,
+        weightPrices,
+        contents,
+        nutrition,
+        salePercentage,
+        salePriceOverride,
+        saleOverrides,
+        saleStartsAt,
+        saleEndsAt,
         badge,
         isNewArrival,
         isActive,
@@ -652,6 +1027,126 @@ adminRoutes.delete("/products/:id", async (c: AdminContext) => {
   }
 
   return c.json({ ok: true });
+});
+
+/** The status of a configured sale at a moment: the window decides. */
+function saleStatus(
+  startsAt: string | null,
+  endsAt: string | null,
+  now: Date,
+): "upcoming" | "active" | "ended" {
+  const starts = startsAt === null ? Number.NaN : Date.parse(startsAt);
+  const ends = endsAt === null ? Number.NaN : Date.parse(endsAt);
+  if (!Number.isFinite(starts) || !Number.isFinite(ends) || ends <= now.getTime()) {
+    // A sale with no usable window is not running and will not start.
+    return "ended";
+  }
+  return starts > now.getTime() ? "upcoming" : "active";
+}
+
+/** The most products one sale list may carry. */
+const MAX_SALES_LIMIT = 100;
+
+/**
+ * The sales of the admin: every product that carries a sale rule, newest
+ * window first, with the status of its window at this moment.
+ */
+adminRoutes.get("/sales", async (c: AdminContext) => {
+  const asked = Number(c.req.query("limit"));
+  const limit = Number.isFinite(asked) && asked > 0 ? Math.min(Math.round(asked), MAX_SALES_LIMIT) : 50;
+
+  const { results } = await c.env.DB
+    .prepare(
+      `SELECT ${PRODUCT_COLUMNS}
+       FROM products p
+       LEFT JOIN categories c ON c.id = p.category_id
+       WHERE p.sale_percentage > 0
+          OR p.sale_price_override IS NOT NULL
+          OR (p.sale_overrides IS NOT NULL AND p.sale_overrides != '{}')
+       ORDER BY p.sale_starts_at DESC, p.id ASC
+       LIMIT ?`,
+    )
+    .bind(limit)
+    .all<ProductRow>();
+
+  const now = new Date();
+  return c.json(
+    results.map((row) => ({
+      ...toProduct(row),
+      sale_status: saleStatus(row.sale_starts_at, row.sale_ends_at, now),
+    })),
+  );
+});
+
+/** The body of a sale route that is not JSON. */
+const INVALID_SALE_BODY = "Invalid body";
+
+adminRoutes.post("/sales/category", async (c: AdminContext) => {
+  const body = await readJsonBody(c);
+  if (!body) {
+    return c.json({ detail: INVALID_SALE_BODY }, 400);
+  }
+
+  const categoryId = readString(body.category_id);
+  if (!categoryId) {
+    return c.json({ detail: BAD_CATEGORY_ID }, 400);
+  }
+  if (!(await categoryExists(c.env.DB, categoryId))) {
+    return c.json({ detail: CATEGORY_NOT_FOUND }, 400);
+  }
+
+  // A category sale is a percentage sale by definition: 0 would mean
+  // "start a sale that does nothing", which is what ending is for.
+  const percentage = readSalePercentage(body.percentage);
+  if (percentage === null || percentage < 1) {
+    return c.json({ detail: BAD_SALE_PCT }, 400);
+  }
+
+  const window = readSaleWindow(body.starts_at, body.ends_at);
+  if (window === null || window.startsAt === null) {
+    return c.json({ detail: BAD_SALE_WINDOW }, 400);
+  }
+
+  // One bulk write: every active product of the category joins the sale and
+  // loses its per-product tweaks — a new category sale resets the tweaks.
+  const result = await c.env.DB
+    .prepare(
+      `UPDATE products
+       SET sale_percentage = ?, sale_price_override = NULL, sale_overrides = NULL,
+           sale_starts_at = ?, sale_ends_at = ?
+       WHERE category_id = ? AND is_active = 1`,
+    )
+    .bind(percentage, window.startsAt, window.endsAt, categoryId)
+    .run();
+
+  return c.json({ updated: result.meta?.changes ?? 0 });
+});
+
+adminRoutes.post("/sales/end", async (c: AdminContext) => {
+  const body = await readJsonBody(c);
+  if (!body) {
+    return c.json({ detail: INVALID_SALE_BODY }, 400);
+  }
+
+  const categoryId = readString(body.category_id);
+  if (!categoryId) {
+    return c.json({ detail: BAD_CATEGORY_ID }, 400);
+  }
+  if (!(await categoryExists(c.env.DB, categoryId))) {
+    return c.json({ detail: CATEGORY_NOT_FOUND }, 400);
+  }
+
+  const result = await c.env.DB
+    .prepare(
+      `UPDATE products
+       SET sale_percentage = 0, sale_price_override = NULL, sale_overrides = NULL,
+           sale_starts_at = NULL, sale_ends_at = NULL
+       WHERE category_id = ? AND is_active = 1`,
+    )
+    .bind(categoryId)
+    .run();
+
+  return c.json({ updated: result.meta?.changes ?? 0 });
 });
 
 /** The message of an order that is not there. */
