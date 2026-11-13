@@ -92,11 +92,13 @@ beforeAll(async () => {
 
 describe("seed data", () => {
   describe("catalog", () => {
-    it("seeds the seven categories with taglines and seed image URLs", async () => {
+    it("seeds the ten categories with taglines and seed image URLs", async () => {
       const res = await app.request("/api/categories", {}, env);
       expect(res.status).toBe(200);
       const categories = (await res.json()) as { slug: string; image_url: string | null; tagline: string | null }[];
-      expect(categories).toHaveLength(7);
+      // Seven seed categories plus the three growth categories migration 0002
+      // seeds (apparel, aminos, gym-gear at sort_order 90/91/92).
+      expect(categories).toHaveLength(10);
       expect(categories.map((c) => c.slug)).toEqual([
         "proteins",
         "gainers",
@@ -105,6 +107,9 @@ describe("seed data", () => {
         "fit_foods",
         "vitamins",
         "fat_loss",
+        "apparel",
+        "aminos",
+        "gym-gear",
       ]);
       expect(categories.find((c) => c.slug === "proteins")).toMatchObject({
         slug: "proteins",
@@ -204,7 +209,7 @@ describe("seed data", () => {
       expect(first.status).toBe(200);
       expect(await first.json()).toEqual({ ok: true });
 
-      expect(await count("categories")).toBe(7);
+      expect(await count("categories")).toBe(10);
       expect(await count("products")).toBe(18);
       expect(await count("coupons")).toBe(3);
       expect(await count("users")).toBe(2);

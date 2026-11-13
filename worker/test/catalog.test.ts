@@ -52,6 +52,16 @@ interface ProductJson {
   rating: number;
   orders_count: number;
   created_at: string;
+  is_on_sale: number;
+  sale_percentage: number;
+  sale_ends_at: string | null;
+  sale_price_effective: number;
+  size_prices: Record<string, number> | null;
+  size_prices_regular: Record<string, number> | null;
+  flavor_images: Record<string, string>;
+  weight_images: Record<string, string>;
+  contents: string | null;
+  nutrition: string | null;
 }
 
 function get(path: string) {
@@ -121,6 +131,17 @@ interface ProductFixture {
    * fixture can store a wrong value to prove that.
    */
   storedDiscountPercent?: number;
+  /** The sale and variant columns; a fixture that omits them stores nulls. */
+  flavorImages?: Record<string, string>;
+  weightImages?: Record<string, string>;
+  weightPrices?: Record<string, number>;
+  contents?: string;
+  nutrition?: string;
+  salePercentage?: number;
+  salePriceOverride?: number;
+  saleOverrides?: Record<string, number>;
+  saleStartsAt?: string;
+  saleEndsAt?: string;
 }
 
 async function insertProduct(product: ProductFixture): Promise<void> {
@@ -129,8 +150,10 @@ async function insertProduct(product: ProductFixture): Promise<void> {
       `INSERT INTO products
          (id, name, slug, brand, category_id, mrp, sale_price, discount_percent,
           stock, images, flavors, weight_options, badge, is_new_arrival,
-          is_active, rating, orders_count, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          is_active, rating, orders_count, created_at,
+          flavor_images, weight_images, weight_prices, contents, nutrition,
+          sale_percentage, sale_price_override, sale_overrides, sale_starts_at, sale_ends_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       product.id,
@@ -151,6 +174,16 @@ async function insertProduct(product: ProductFixture): Promise<void> {
       product.rating,
       product.ordersCount,
       product.createdAt,
+      product.flavorImages ? JSON.stringify(product.flavorImages) : null,
+      product.weightImages ? JSON.stringify(product.weightImages) : null,
+      product.weightPrices ? JSON.stringify(product.weightPrices) : null,
+      product.contents ?? null,
+      product.nutrition ?? null,
+      product.salePercentage ?? 0,
+      product.salePriceOverride ?? null,
+      product.saleOverrides ? JSON.stringify(product.saleOverrides) : null,
+      product.saleStartsAt ?? null,
+      product.saleEndsAt ?? null,
     )
     .run();
 }
@@ -266,9 +299,14 @@ describe("catalog routes", () => {
     it("lists the categories ordered by sort_order", async () => {
       const categories = await getJson<CategoryJson[]>("/api/categories");
 
+      // The three storefront-growth categories come from migration 0002 and
+      // sort after every fixture category (90, 91, 92).
       expect(categories.map((category) => category.slug)).toEqual([
         "gainers",
         "proteins",
+        "apparel",
+        "aminos",
+        "gym-gear",
       ]);
       expect(categories[0]).toEqual({
         id: CAT_GAINERS,
@@ -458,5 +496,232 @@ describe("catalog routes", () => {
       expect(res.status).toBe(404);
       expect(await res.json()).toEqual({ detail: "Product not found" });
     });
+  });
+});
+
+/**
+ * The sale engine of the catalog: the served sale state, the per-size price
+ * maps, the `on_sale=1` filter, the effective price sort and the `ids=`
+ * filter the cart re-hydration uses.
+ */
+describe("catalog sale engine", () => {
+  /** The ids of the sale fixtures of this describe. */
+  const PROD_SALE = "prod_sale_sized";
+  const PROD_PLAIN = "prod_sale_plain";
+  const PROD_EXPIRED = "prod_sale_expired";
+  const PROD_SIZELESS = "prod_sale_sizeless";
+  const PROD_FULL = "prod_sale_full";
+
+  const STARTS = new Date(Date.now() - 86_400_000).toISOString();
+  const ENDS = new Date(Date.now() + 7 * 86_400_000).toISOString();
+  const ENDED = new Date(Date.now() - 3_600_000).toISOString();
+
+  beforeAll(async () => {
+    await insertProduct({
+      id: PROD_SALE,
+      name: "Kinetic Mass Gainer Sale",
+      slug: "kinetic-mass-gainer-sale",
+      brand: "Kinetic",
+      categoryId: CAT_PROTEINS,
+      mrp: 349_900,
+      salePrice: 249_900,
+      stock: 8,
+      images: ["/api/images/gainer-sale.jpg"],
+      flavors: ["Chocolate"],
+      weightOptions: ["2 kg", "800 g"],
+      badge: null,
+      isNewArrival: 0,
+      isActive: 1,
+      rating: 4.4,
+      ordersCount: 0,
+      createdAt: "2026-05-01 10:00:00",
+      weightPrices: { "2 kg": 199_900 },
+      salePercentage: 20,
+      saleStartsAt: STARTS,
+      saleEndsAt: ENDS,
+    });
+
+    // The plain product: pricier than the sale product's effective price but
+    // cheaper than its regular price, so the effective sort has to win.
+    await insertProduct({
+      id: PROD_PLAIN,
+      name: "Kinetic Whey Plain",
+      slug: "kinetic-whey-plain",
+      brand: "Kinetic",
+      categoryId: CAT_PROTEINS,
+      mrp: 299_900,
+      salePrice: 219_900,
+      stock: 5,
+      images: [],
+      flavors: [],
+      weightOptions: [],
+      badge: null,
+      isNewArrival: 0,
+      isActive: 1,
+      rating: 4.0,
+      ordersCount: 0,
+      createdAt: "2026-05-02 10:00:00",
+    });
+
+    await insertProduct({
+      id: PROD_EXPIRED,
+      name: "Kinetic Expired Sale",
+      slug: "kinetic-expired-sale",
+      brand: "Kinetic",
+      categoryId: CAT_PROTEINS,
+      mrp: 299_900,
+      salePrice: 249_900,
+      stock: 5,
+      images: [],
+      flavors: [],
+      weightOptions: ["1 kg"],
+      badge: null,
+      isNewArrival: 0,
+      isActive: 1,
+      rating: 4.0,
+      ordersCount: 0,
+      createdAt: "2026-05-03 10:00:00",
+      salePercentage: 20,
+      saleStartsAt: "2026-01-01T00:00:00.000Z",
+      saleEndsAt: ENDED,
+    });
+
+    await insertProduct({
+      id: PROD_SIZELESS,
+      name: "Kinetic Sizeless Override",
+      slug: "kinetic-sizeless-override",
+      brand: "Kinetic",
+      categoryId: CAT_PROTEINS,
+      mrp: 129_900,
+      salePrice: 99_900,
+      stock: 5,
+      images: [],
+      flavors: [],
+      weightOptions: [],
+      badge: null,
+      isNewArrival: 0,
+      isActive: 1,
+      rating: 4.0,
+      ordersCount: 0,
+      createdAt: "2026-05-04 10:00:00",
+      salePriceOverride: 79_900,
+      saleStartsAt: STARTS,
+      saleEndsAt: ENDS,
+    });
+
+    await insertProduct({
+      id: PROD_FULL,
+      name: "Kinetic Full Variant",
+      slug: "kinetic-full-variant",
+      brand: "Kinetic",
+      categoryId: CAT_PROTEINS,
+      mrp: 219_900,
+      salePrice: 189_900,
+      stock: 5,
+      images: ["/api/images/full.jpg"],
+      flavors: ["Vanilla"],
+      weightOptions: ["2 kg"],
+      badge: null,
+      isNewArrival: 0,
+      isActive: 1,
+      rating: 4.0,
+      ordersCount: 0,
+      createdAt: "2026-05-05 10:00:00",
+      flavorImages: { Vanilla: "/api/images/full-vanilla.jpg" },
+      weightImages: { "2 kg": "/api/images/full-2kg.jpg", "9 L": "/api/images/stale.jpg" },
+      weightPrices: { "2 kg": 179_900, "9 L": 123 },
+      saleOverrides: { "9 L": 55 },
+      contents: "2 scoops, 1 shaker",
+      nutrition: "24 g protein per serving",
+    });
+  });
+
+  it("serves the sale state and the per-size price maps of an on-sale product", async () => {
+    const product = await getJson<ProductJson>(`/api/products/${PROD_SALE}`);
+
+    expect(product.is_on_sale).toBe(1);
+    expect(product.sale_percentage).toBe(20);
+    expect(product.sale_price_effective).toBe(199_920); // 249900 × 80%
+    // "2 kg" has its own price; "800 g" folds from the base.
+    expect(product.size_prices).toEqual({ "2 kg": 159_920, "800 g": 199_920 });
+    expect(product.size_prices_regular).toEqual({ "2 kg": 199_900, "800 g": 249_900 });
+    expect(product.sale_ends_at).toBe(ENDS);
+  });
+
+  it("serves regular prices once the sale window has expired", async () => {
+    const product = await getJson<ProductJson>(`/api/products/${PROD_EXPIRED}`);
+
+    expect(product.is_on_sale).toBe(0);
+    expect(product.sale_price_effective).toBe(249_900);
+    expect(product.size_prices).toEqual({ "1 kg": 249_900 });
+    expect(product.size_prices_regular).toEqual({ "1 kg": 249_900 });
+  });
+
+  it("filters to on-sale products with on_sale=1", async () => {
+    const products = await getJson<ProductJson[]>("/api/products?on_sale=1");
+
+    expect(ids(products).sort()).toEqual([PROD_SALE, PROD_SIZELESS].sort());
+  });
+
+  it("ignores stale option-map keys and keeps the base price intact", async () => {
+    const product = await getJson<ProductJson>(`/api/products/${PROD_FULL}`);
+
+    // "9 L" is not in weight_options: it never reaches the served size maps.
+    expect(product.size_prices).toEqual({ "2 kg": 179_900 });
+    expect(product.size_prices_regular).toEqual({ "2 kg": 179_900 });
+    expect(product.is_on_sale).toBe(0);
+    expect(product.sale_price_effective).toBe(189_900);
+    // The image maps are served as parsed; a stale key is harmless there.
+    expect(product.weight_images).toEqual({
+      "2 kg": "/api/images/full-2kg.jpg",
+      "9 L": "/api/images/stale.jpg",
+    });
+    expect(product.contents).toBe("2 scoops, 1 shaker");
+    expect(product.nutrition).toBe("24 g protein per serving");
+  });
+
+  it("ranks price_asc by the effective base price during a sale", async () => {
+    const products = await getJson<ProductJson[]>(
+      `/api/products?category=proteins&sort=price_asc`,
+    );
+
+    // Effective base prices: sizeless override 79900 < full (regular) 189900
+    // < sized sale 199920 < plain 219900 < plant/expired 249900 (tie → id)
+    // < whey 299900. The sale product ranks by ₹199920, not by its regular
+    // ₹249900 — that is the whole point of the effective sort.
+    expect(ids(products)).toEqual([
+      PROD_SIZELESS,
+      PROD_FULL,
+      PROD_SALE,
+      PROD_PLAIN,
+      PROD_PLANT,
+      PROD_EXPIRED,
+      PROD_WHEY,
+    ]);
+  });
+
+  it("serves a sizeless product's base override as its effective price", async () => {
+    const product = await getJson<ProductJson>(`/api/products/${PROD_SIZELESS}`);
+
+    expect(product.is_on_sale).toBe(1);
+    expect(product.sale_price_effective).toBe(79_900);
+    expect(product.size_prices).toBeNull();
+    expect(product.size_prices_regular).toBeNull();
+  });
+
+  it("returns exactly the requested active products for ids=", async () => {
+    const products = await getJson<ProductJson[]>(
+      `/api/products?ids=${PROD_WHEY},${PROD_RETIRED},${PROD_SALE}`,
+    );
+
+    expect(ids(products).sort()).toEqual([PROD_WHEY, PROD_SALE].sort());
+  });
+
+  it("answers 400 when ids= lists more than 50 products", async () => {
+    const many = Array.from({ length: 51 }, (_, i) => `prod_id_${i}`).join(",");
+    const res = await get(`/api/products?ids=${many}`);
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ detail: "ids must list at most 50 products" });
   });
 });

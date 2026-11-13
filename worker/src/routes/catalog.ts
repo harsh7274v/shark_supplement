@@ -19,11 +19,41 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
 import type { Env } from "../env";
+import {
+  effectiveVariantPrice,
+  isOnSale,
+  parseOptionMaps,
+  regularVariantPrice,
+  type SaleProductColumns,
+} from "../lib/sale";
 
 type CatalogEnv = { Bindings: Env };
 type CatalogContext = Context<CatalogEnv>;
 
 export const catalogRoutes = new Hono<CatalogEnv>();
+
+/**
+ * The SQL predicate of a product whose sale window is open right now. The
+ * catalog evaluates sales against the clock on every read, so a sale starts
+ * and ends by itself and no scheduled job ever has to run.
+ */
+const ON_SALE_SQL = `
+  p.sale_starts_at IS NOT NULL AND p.sale_ends_at IS NOT NULL
+  AND datetime(p.sale_starts_at) <= datetime('now') AND datetime(p.sale_ends_at) > datetime('now')
+  AND (p.sale_percentage > 0 OR p.sale_price_override IS NOT NULL)`;
+
+/**
+ * The effective base price of a product: the exact base override when one is
+ * set, the percentage math otherwise — or simply the regular price when no
+ * sale is running. The price sorts rank by this, so a ₹499 sale item sorts
+ * as ₹499 next to genuinely ₹499 products. (Per-size overrides do not take
+ * part in the sort: a sized product is ranked by its base price.)
+ */
+const EFFECTIVE_BASE_SQL = `
+  CASE WHEN ${ON_SALE_SQL} AND p.sale_price_override IS NOT NULL THEN p.sale_price_override
+       WHEN ${ON_SALE_SQL} AND p.sale_percentage > 0
+         THEN CAST(ROUND(p.sale_price * (100 - p.sale_percentage) / 100.0) AS INTEGER)
+       ELSE p.sale_price END`;
 
 /** The order of the default sort; the most ordered products come first. */
 const DEFAULT_ORDER = "p.orders_count DESC, p.id ASC";
@@ -32,8 +62,8 @@ const DEFAULT_ORDER = "p.orders_count DESC, p.id ASC";
 const SORT_SQL = new Map<string, string>([
   ["most_ordered", DEFAULT_ORDER],
   ["top_rated", "p.rating DESC, p.id ASC"],
-  ["price_asc", "p.sale_price ASC, p.id ASC"],
-  ["price_desc", "p.sale_price DESC, p.id ASC"],
+  ["price_asc", `${EFFECTIVE_BASE_SQL} ASC, p.id ASC`],
+  ["price_desc", `${EFFECTIVE_BASE_SQL} DESC, p.id ASC`],
   ["newest", "p.created_at DESC, p.id ASC"],
 ]);
 
@@ -67,6 +97,16 @@ const PRODUCT_COLUMNS = `
   p.images,
   p.flavors,
   p.weight_options,
+  p.flavor_images,
+  p.weight_images,
+  p.weight_prices,
+  p.contents,
+  p.nutrition,
+  p.sale_percentage,
+  p.sale_price_override,
+  p.sale_overrides,
+  p.sale_starts_at,
+  p.sale_ends_at,
   p.badge,
   p.is_new_arrival,
   p.rating,
@@ -90,6 +130,16 @@ interface ProductRow {
   images: string | null;
   flavors: string | null;
   weight_options: string | null;
+  flavor_images: string | null;
+  weight_images: string | null;
+  weight_prices: string | null;
+  contents: string | null;
+  nutrition: string | null;
+  sale_percentage: number;
+  sale_price_override: number | null;
+  sale_overrides: string | null;
+  sale_starts_at: string | null;
+  sale_ends_at: string | null;
   badge: string | null;
   is_new_arrival: number;
   rating: number;
@@ -119,6 +169,16 @@ interface ProductJson {
   rating: number;
   orders_count: number;
   created_at: string;
+  is_on_sale: 0 | 1;
+  sale_percentage: number;
+  sale_ends_at: string | null;
+  sale_price_effective: number;
+  size_prices: Record<string, number> | null;
+  size_prices_regular: Record<string, number> | null;
+  flavor_images: Record<string, string>;
+  weight_images: Record<string, string>;
+  contents: string | null;
+  nutrition: string | null;
 }
 
 /**
@@ -140,8 +200,51 @@ function parseArray(value: string | null): string[] {
   }
 }
 
+/**
+ * Parses a JSON image-map column of the products table: an object whose
+ * values are strings. A column that is not one reads as an empty map, so a
+ * stale or corrupt key can never break a product page.
+ */
+function parseImageMap(value: string | null): Record<string, string> {
+  if (!value) {
+    return {};
+  }
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return {};
+    }
+    const out: Record<string, string> = {};
+    for (const [key, val] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof val === "string") {
+        out[key] = val;
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 /** Turns a product row into the JSON the API serves. */
 function toProduct(row: ProductRow): ProductJson {
+  const maps = parseOptionMaps(row);
+  const now = new Date();
+  const weightOptions = parseArray(row.weight_options);
+  const onSale = isOnSale(row, now) ? 1 : 0;
+
+  // The ready-to-render per-size price maps: only the sizes the product
+  // actually lists take part, so a stale map key is simply ignored. A
+  // sizeless product serves no maps — the card falls back to the base price.
+  const sizePrices = weightOptions.map((size) => [
+    size,
+    effectiveVariantPrice(row, maps, size, now),
+  ]);
+  const sizePricesRegular = weightOptions.map((size) => [
+    size,
+    regularVariantPrice(row, maps, size),
+  ]);
+
   return {
     id: row.id,
     name: row.name,
@@ -157,12 +260,22 @@ function toProduct(row: ProductRow): ProductJson {
     stock: row.stock,
     images: parseArray(row.images),
     flavors: parseArray(row.flavors),
-    weight_options: parseArray(row.weight_options),
+    weight_options: weightOptions,
     badge: row.badge,
     is_new_arrival: row.is_new_arrival,
     rating: row.rating,
     orders_count: row.orders_count,
     created_at: row.created_at,
+    is_on_sale: onSale,
+    sale_percentage: row.sale_percentage,
+    sale_ends_at: row.sale_ends_at,
+    sale_price_effective: effectiveVariantPrice(row, maps, null, now),
+    size_prices: weightOptions.length > 0 ? Object.fromEntries(sizePrices) : null,
+    size_prices_regular: weightOptions.length > 0 ? Object.fromEntries(sizePricesRegular) : null,
+    flavor_images: parseImageMap(row.flavor_images),
+    weight_images: parseImageMap(row.weight_images),
+    contents: row.contents,
+    nutrition: row.nutrition,
   };
 }
 
@@ -180,6 +293,9 @@ function wantsNewArrivals(value: string | undefined): boolean {
   const normalized = (value ?? "").trim().toLowerCase();
   return normalized === "1" || normalized === "true";
 }
+
+/** The most ids one `ids=` filter may carry (the same bound the cart uses). */
+const MAX_IDS = 50;
 
 catalogRoutes.get("/categories", async (c: CatalogContext) => {
   const { results } = await c.env.DB.prepare(
@@ -226,6 +342,21 @@ catalogRoutes.get("/products", async (c: CatalogContext) => {
 
   if (wantsNewArrivals(query.new_arrivals)) {
     where.push("p.is_new_arrival = 1");
+  }
+
+  if (wantsNewArrivals(query.on_sale)) {
+    where.push(ON_SALE_SQL);
+  }
+
+  // The `ids=` filter: the cart re-hydration asks for the products it holds
+  // by id. The ids are deduped and bounded, like every other query here.
+  const idList = [...new Set((query.ids ?? "").split(",").map((id) => id.trim()).filter(Boolean))];
+  if (idList.length > MAX_IDS) {
+    return c.json({ detail: "ids must list at most 50 products" }, 400);
+  }
+  if (idList.length > 0) {
+    where.push(`p.id IN (${idList.map(() => "?").join(", ")})`);
+    binds.push(...idList);
   }
 
   const order = SORT_SQL.get(query.sort ?? "") ?? DEFAULT_ORDER;
