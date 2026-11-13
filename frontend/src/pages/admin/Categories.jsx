@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Plus, Trash2, Edit2, RefreshCw } from "lucide-react";
+import { Plus, Trash2, Edit2, RefreshCw, Image as ImageIcon } from "lucide-react";
 import { API, formatApiError } from "../../lib/api";
 import { toast } from "sonner";
 
@@ -20,6 +20,37 @@ export default function Categories() {
     sort_order: "",
   });
   const [errors, setErrors] = useState({});
+
+  const fileInputRef = useRef(null);
+  const [uploading, setUploading] = useState(false);
+
+  /** Uploads one image for the category being edited or created. */
+  const uploadCategoryImage = async (file) => {
+    if (!file) {
+      return;
+    }
+    if (!file.type || !file.type.startsWith("image/")) {
+      toast.error(`"${file.name}" is not an image`);
+      return;
+    }
+    setUploading(true);
+    const data = new FormData();
+    data.append("file", file);
+    try {
+      const { data: uploadData } = await API.post("/admin/uploads", data);
+      const url = uploadData?.url;
+      if (url) {
+        setForm((prev) => ({ ...prev, image_url: url }));
+      }
+    } catch (error) {
+      toast.error(formatApiError(error) || "Image upload failed");
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
 
   const fetchCategories = useCallback(async () => {
     setLoading(true);
@@ -295,13 +326,32 @@ export default function Categories() {
                   <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
                     Image URL
                   </label>
-                  <input
-                    data-testid="admin-category-image-url"
-                    value={form.image_url}
-                    onChange={(event) => setField("image_url", event.target.value)}
-                    className="w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors border-slate-200"
-                    placeholder="/api/images/products/...jpg"
-                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      data-testid="admin-category-image-url"
+                      value={form.image_url}
+                      onChange={(event) => setField("image_url", event.target.value)}
+                      className="w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors border-slate-200"
+                      placeholder="/api/images/products/...jpg"
+                    />
+                    <button
+                      type="button"
+                      data-testid="category-photo-btn"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploading}
+                      title={uploading ? "Uploading…" : "Upload a category image"}
+                      className="shrink-0 w-10 h-10 rounded-xl border border-slate-200 text-slate-400 hover:border-kinetic-red hover:text-kinetic-red flex items-center justify-center transition-colors disabled:opacity-60"
+                    >
+                      <ImageIcon className="w-4 h-4" />
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(event) => uploadCategoryImage(event.target.files?.[0])}
+                    />
+                  </div>
                 </div>
                 <div>
                   <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">

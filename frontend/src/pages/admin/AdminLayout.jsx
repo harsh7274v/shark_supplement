@@ -8,6 +8,7 @@ import Categories from "./Categories";
 import Orders from "./Orders";
 import Payments from "./Payments";
 import Coupons from "./Coupons";
+import Sales from "./Sales";
 
 function LayoutDashboardIcon() {
   return (
@@ -50,6 +51,7 @@ const NAV = [
   { key: "products", label: "Products", to: "/admin/products", icon: <BoxIcon /> },
   { key: "categories", label: "Categories", to: "/admin/categories", icon: <ClipboardListIcon /> },
   { key: "new-arrivals", label: "New Arrivals", to: "/admin/new-arrivals", icon: <SparklesIcon /> },
+  { key: "sales", label: "Sales", to: "/admin/sales", icon: <TagIcon /> },
   { key: "orders", label: "Orders", to: "/admin/orders", icon: <ShoppingCartIcon /> },
   { key: "payments", label: "Payments", to: "/admin/payments", icon: <CreditCardIcon /> },
   { key: "coupons", label: "Coupons", to: "/admin/coupons", icon: <TagIcon /> },
@@ -162,6 +164,7 @@ export default function AdminLayout() {
                 <Route index element={<Overview />} />
                 <Route path="products" element={<Products tab="list" />} />
                 <Route path="new-arrivals" element={<Products tab="arrivals" />} />
+                <Route path="sales" element={<Sales />} />
                 <Route path="categories" element={<Categories />} />
                 <Route path="orders" element={<Orders />} />
                 <Route path="orders/:id" element={<Orders />} />

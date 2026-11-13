@@ -63,6 +63,50 @@ export const inr = (n) => "₹" + Math.round(n).toLocaleString("en-IN");
 /** Rupees → integer paise (mirrors the server-side `toPaise` money util). */
 export const toPaise = (n) => Math.round(Number(n) * 100);
 
+/**
+ * Reads a `datetime-local` value (a date and time without seconds, IST)
+ * and returns it as a UTC ISO string. An empty or unparseable value reads as
+ * an empty string, so a form that was never filled does not crash the save.
+ */
+export function istToUtc(local) {
+  if (typeof local !== "string" || local.trim() === "") {
+    return "";
+  }
+  const parsed = new Date(`${local.trim()}:00+05:30`);
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+  return parsed.toISOString();
+}
+
+/**
+ * Formats a UTC ISO string in IST for the display of a sale window: the date
+ * and the time of day in India, with the IST suffix. An empty or unparseable
+ * value reads as an empty string.
+ */
+export function fmtIst(iso) {
+  if (typeof iso !== "string" || iso.trim() === "") {
+    return "";
+  }
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const day = date.toLocaleDateString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+  const time = date.toLocaleTimeString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+  return `${day}, ${time} IST`;
+}
+
 export const scrollToSection = (id) => {
   const el = document.getElementById(id);
   if (!el) return;
