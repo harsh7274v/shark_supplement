@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "sync:images": "node scripts/upload-images-to-r2.mjs",
+    "sync:images:remote": "node scripts/upload-images-to-r2.mjs --remote",
     "test": "vitest run",
     "typecheck": "tsc"
   },

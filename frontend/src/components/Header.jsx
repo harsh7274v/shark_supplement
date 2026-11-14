@@ -6,6 +6,7 @@ import { useAuth } from "../context/AuthContext";
 import { useCart } from "../context/CartContext";
 import { scrollToSection } from "../lib/api";
 import Logo from "./Logo";
+import SaleCountdownBanner from "./SaleCountdownBanner";
 
 const NAV_LINKS = [
   { label: "Shop All", category: "all" },
@@ -31,8 +32,14 @@ export default function Header({ onNavCategory }) {
 
   return (
     <div className="sticky top-0 z-50">
-      <div className="bg-kinetic-ink text-white text-[11px] font-bold tracking-[0.18em] uppercase text-center py-2 px-4">
-        Free express shipping over ₹999 · Use code <span className="text-kinetic-orange">KINETIC10</span> for 10% off
+      <div className="bg-kinetic-ink text-white text-[11px] font-bold tracking-[0.16em] uppercase text-center py-2 px-4 flex items-center justify-center gap-2 flex-wrap">
+        <span>⚡ FREE SHIPPING ALL OVER JAMSHEDPUR • FAST EXPRESS DELIVERY •</span>
+        <button
+          onClick={() => scrollToSection("categories")}
+          className="text-kinetic-orange hover:text-white underline underline-offset-4 transition-colors font-black cursor-pointer tracking-wider"
+        >
+          SHOP NOW
+        </button>
       </div>
       <header className="backdrop-blur-xl bg-white/85 border-b border-slate-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
@@ -187,6 +194,7 @@ export default function Header({ onNavCategory }) {
           )}
         </AnimatePresence>
       </header>
+      <SaleCountdownBanner />
     </div>
   );
 }

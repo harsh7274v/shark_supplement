@@ -5,19 +5,19 @@ import { scrollToSection } from "../lib/api";
 
 const SLIDES = [
   {
-    img: "/images/hero_1.jpg",
+    img: "/api/images/catalog/hero_1.jpg",
     kicker: "WHEY ISOLATE",
-    title: "Kinetic Gold",
+    title: "Tom Nutrition Gold",
     sub: "24g protein · 0g added sugar",
   },
   {
-    img: "/images/hero_2.jpg",
+    img: "/api/images/catalog/hero_2.jpg",
     kicker: "PRE-WORKOUT",
     title: "Surge 300",
     sub: "300mg caffeine · skin-splitting pumps",
   },
   {
-    img: "/images/hero_3.jpg",
+    img: "/api/images/catalog/hero_3.jpg",
     kicker: "BESTSELLER",
     title: "The Gold Standard",
     sub: "Lab tested · banned-substance free",

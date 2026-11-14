@@ -91,6 +91,7 @@ interface CouponFixture {
   value: number;
   minOrder: number;
   active: number;
+  singleUsePerUser?: number;
 }
 
 async function insertProduct(product: ProductFixture): Promise<void> {
@@ -126,8 +127,8 @@ async function insertProduct(product: ProductFixture): Promise<void> {
 async function insertCoupon(coupon: CouponFixture): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO coupons (id, code, discount_type, discount_value, min_order, active)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO coupons (id, code, discount_type, discount_value, min_order, active, single_use_per_user)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       coupon.id,
@@ -136,6 +137,7 @@ async function insertCoupon(coupon: CouponFixture): Promise<void> {
       coupon.value,
       coupon.minOrder,
       coupon.active,
+      coupon.singleUsePerUser ?? 0,
     )
     .run();
 }
@@ -169,6 +171,12 @@ function cookieHeader(res: Response, name: string): string {
 /** A fresh email per test. */
 function uniqueEmail(): string {
   return `orders-${crypto.randomUUID()}@example.com`;
+}
+
+let phoneCounter = 1000000;
+/** A fresh phone per test. */
+function uniquePhone(): string {
+  return `+91 98${phoneCounter++}`;
 }
 
 /**
@@ -266,7 +274,7 @@ async function insertOrders(userId: string, count: number): Promise<void> {
 
     for (let index = offset; index < offset + size; index++) {
       const orderId = `ord_bulk_${index}_${userId}`;
-      const created = new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString();
+      const created = new Date(Date.now() - (count - index) * 1000).toISOString();
 
       statements.push(
         db
@@ -457,6 +465,17 @@ beforeAll(async () => {
     minOrder: 999_900,
     active: 1,
   });
+
+  // A single-use coupon for testing per-customer limits
+  await insertCoupon({
+    id: "coupon_single10",
+    code: "SINGLE10",
+    type: "percent",
+    value: 10,
+    minOrder: 100_000,
+    active: 1,
+    singleUsePerUser: 1,
+  });
 });
 
 describe("order routes", () => {
@@ -519,20 +538,40 @@ describe("order routes", () => {
       const res = await post("/api/coupons/validate", { code: "BIGSPEND", subtotal: SUBTOTAL });
 
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ valid: false });
+      expect(await res.json()).toMatchObject({ valid: false });
     });
 
     it("reads the minimum order in paise", async () => {
       // The minimum of KINETIC10 is Rs 1000, so Rs 999 is too little and
       // Rs 1001 is enough.
       const tooSmall = await post("/api/coupons/validate", { code: "KINETIC10", subtotal: 99_900 });
-      expect(await tooSmall.json()).toEqual({ valid: false });
+      expect(await tooSmall.json()).toMatchObject({ valid: false });
 
       const bigEnough = await post("/api/coupons/validate", {
         code: "KINETIC10",
         subtotal: 100_100,
       });
       expect(await bigEnough.json()).toMatchObject({ valid: true });
+    });
+
+    it("rejects coupon with detail message if customer has already used it", async () => {
+      const email = uniqueEmail();
+      const phone = uniquePhone();
+      // Place first order with coupon
+      await post("/api/orders", cart({ coupon_code: "SINGLE10", shipping: { ...SHIPPING, email, phone } }));
+
+      // Validate again with same email
+      const res = await post("/api/coupons/validate", {
+        code: "SINGLE10",
+        subtotal: SUBTOTAL,
+        email,
+        phone,
+      });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        valid: false,
+        detail: "You have already used this coupon code.",
+      });
     });
 
     it("rejects a body without a code", async () => {
@@ -583,7 +622,7 @@ describe("order routes", () => {
       expect(order?.name).toBe(SHIPPING.full_name);
       expect(order?.email).toBe(SHIPPING.email);
       expect(order?.phone).toBe(SHIPPING.phone);
-      expect(JSON.parse(order?.address ?? "{}")).toEqual(SHIPPING);
+      expect(JSON.parse(order?.address ?? "{}")).toMatchObject(SHIPPING);
     });
 
     it("gives an order of a signed in buyer the user id", async () => {
@@ -760,6 +799,95 @@ describe("order routes", () => {
       const order = await readOrder(body.order_id);
       expect(order?.coupon_code).toBeNull();
       expect(order?.discount).toBe(0);
+    });
+
+    it("refuses to place order if customer has already used single-use coupon", async () => {
+      const email = uniqueEmail();
+      const phone = uniquePhone();
+      // Place first order
+      const first = await post("/api/orders", cart({ coupon_code: "SINGLE10", shipping: { ...SHIPPING, email, phone } }));
+      expect(first.status).toBe(201);
+
+      // Attempt second order with same email and coupon
+      const second = await post("/api/orders", cart({ coupon_code: "SINGLE10", shipping: { ...SHIPPING, email, phone } }));
+      expect(second.status).toBe(400);
+      expect(await second.json()).toEqual({ detail: "You have already used this coupon code." });
+    });
+
+    it("refuses to place order if customer has already used single-use coupon with same phone under different email", async () => {
+      const email1 = uniqueEmail();
+      const email2 = uniqueEmail();
+      const phone = uniquePhone();
+      // Place first order with email1 and phone
+      const first = await post("/api/orders", cart({ coupon_code: "SINGLE10", shipping: { ...SHIPPING, email: email1, phone } }));
+      expect(first.status).toBe(201);
+
+      // Attempt second order with email2 and same phone
+      const second = await post("/api/orders", cart({ coupon_code: "SINGLE10", shipping: { ...SHIPPING, email: email2, phone } }));
+      expect(second.status).toBe(400);
+      expect(await second.json()).toEqual({ detail: "You have already used this coupon code." });
+    });
+
+    it("does not burn single-use coupon when order discount is zero on sale items", async () => {
+      const prodSaleId = "prod_sale_only";
+      await insertProduct({
+        id: prodSaleId,
+        name: "Sale Item Only",
+        slug: "sale-item-only",
+        salePrice: 300_000,
+        stock: 50,
+        salePercentage: 20,
+        saleStartsAt: "2020-01-01 00:00:00",
+        saleEndsAt: "2030-01-01 00:00:00",
+      });
+
+      const email = uniqueEmail();
+      const phone = uniquePhone();
+      // Place order with only sale item and single-use coupon
+      const first = await post(
+        "/api/orders",
+        cart({
+          items: [{ product_id: prodSaleId, qty: 1, flavor: null, weight: null }],
+          coupon_code: "SINGLE10",
+          shipping: { ...SHIPPING, email, phone },
+        }),
+      );
+      expect(first.status).toBe(201);
+      const firstBody = (await first.json()) as { order_id: string };
+      const order = await readOrder(firstBody.order_id);
+      // Because discount is 0 on sale items, coupon was not applied or saved
+      expect(order?.discount).toBe(0);
+      expect(order?.coupon_code).toBeNull();
+
+      // Customer should still be able to use their SINGLE10 coupon on regular items!
+      const second = await post(
+        "/api/orders",
+        cart({ coupon_code: "SINGLE10", shipping: { ...SHIPPING, email, phone } }),
+      );
+      expect(second.status).toBe(201);
+      const secondBody = (await second.json()) as { order_id: string };
+      const secondOrder = await readOrder(secondBody.order_id);
+      expect(secondOrder?.coupon_code).toBe("SINGLE10");
+      expect(secondOrder?.discount).toBeGreaterThan(0);
+    });
+
+    it("continues generating unique order numbers without collision after an order is deleted", async () => {
+      const res1 = await post("/api/orders", cart());
+      const body1 = (await res1.json()) as { order_id: string; order_number: string };
+
+      const res2 = await post("/api/orders", cart());
+      const body2 = (await res2.json()) as { order_id: string; order_number: string };
+
+      // Delete order 1
+      await db.prepare("DELETE FROM orders WHERE id = ?").bind(body1.order_id).run();
+
+      // Place order 3
+      const res3 = await post("/api/orders", cart());
+      expect(res3.status).toBe(201);
+      const body3 = (await res3.json()) as { order_id: string; order_number: string };
+
+      // body3 order number should not collide with body2
+      expect(body3.order_number).not.toBe(body2.order_number);
     });
 
     it("rejects a cart without items", async () => {

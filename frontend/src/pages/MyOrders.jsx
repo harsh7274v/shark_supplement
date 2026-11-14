@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { API, formatApiError, inr } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { toast } from "sonner";
-import { Package, RotateCcw } from "lucide-react";
+import { Package, RotateCcw, CreditCard, MapPin, Truck, ExternalLink, ShieldCheck } from "lucide-react";
 
 const STATUS_COLORS = {
   placed: "bg-kinetic-red/10 text-kinetic-red border-kinetic-red/20",
@@ -146,6 +146,130 @@ function OrderCard({ order, refreshHistory, refreshing }) {
         </section>
       )}
 
+      {/* Courier Tracking Section (if shipped or tracking info available) */}
+      {(order.courier_name || order.tracking_number || order.tracking_url) && (
+        <section
+          className="mt-6 rounded-xl bg-purple-50/70 border border-purple-100 p-4"
+          data-testid={`my-orders-tracking-${order.id}`}
+        >
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center flex-shrink-0">
+                <Truck className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-xs font-black uppercase tracking-wider text-purple-900">
+                  {order.courier_name || "Courier Partner"} Tracking
+                </p>
+                {order.tracking_number && (
+                  <p className="text-xs text-purple-700 font-semibold mt-0.5">
+                    AWB / Tracking ID:{" "}
+                    <span className="font-mono font-bold text-slate-900 bg-white px-1.5 py-0.5 rounded border border-purple-200">
+                      {order.tracking_number}
+                    </span>
+                  </p>
+                )}
+              </div>
+            </div>
+            {order.tracking_url && /^https?:\/\//i.test(order.tracking_url) && (
+              <a
+                href={order.tracking_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-sm transition-all"
+              >
+                <span>Track Package</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* Payment & Delivery Address Grid */}
+      <section className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Payment Details */}
+        <div className="rounded-xl bg-slate-50 border border-slate-100 p-4" data-testid={`my-orders-payment-${order.id}`}>
+          <div className="flex items-center gap-2 mb-2">
+            <CreditCard className="w-4 h-4 text-slate-500" />
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              Payment Information
+            </p>
+          </div>
+          {order.payment ? (
+            <div className="space-y-1.5 text-xs text-slate-600">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">Method</span>
+                <span className="font-bold text-slate-800 uppercase">
+                  {order.payment.method === "cod"
+                    ? "Cash on Delivery"
+                    : order.payment.method === "upi"
+                    ? "UPI"
+                    : "Card / Net Banking"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">Status</span>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border ${
+                    order.payment.status === "paid"
+                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                      : order.payment.status === "on_delivery"
+                      ? "bg-amber-50 text-amber-700 border-amber-200"
+                      : "bg-rose-50 text-rose-700 border-rose-200"
+                  }`}
+                >
+                  {order.payment.status === "on_delivery"
+                    ? "Pay on Delivery"
+                    : order.payment.status}
+                </span>
+              </div>
+              <div className="flex items-center justify-between pt-1 border-t border-slate-200/60">
+                <span className="text-slate-500">Paid / Due</span>
+                <span className="font-extrabold text-slate-900">
+                  {inr((order.payment.amount ?? order.total) / 100)}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-slate-500">Payment details confirmed at checkout.</p>
+          )}
+        </div>
+
+        {/* Delivery Address */}
+        <div className="rounded-xl bg-slate-50 border border-slate-100 p-4" data-testid={`my-orders-address-${order.id}`}>
+          <div className="flex items-center gap-2 mb-2">
+            <MapPin className="w-4 h-4 text-slate-500" />
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              Delivery Address
+            </p>
+          </div>
+          {order.address ? (
+            <div className="text-xs text-slate-600 space-y-0.5">
+              <p className="font-bold text-slate-900">
+                {order.address.full_name || order.name}
+                {(order.address.phone || order.phone) && (
+                  <span className="font-normal text-slate-500 ml-2">
+                    • {order.address.phone || order.phone}
+                  </span>
+                )}
+              </p>
+              <p>{order.address.address}</p>
+              {order.address.landmark && (
+                <p className="text-slate-500">Landmark: {order.address.landmark}</p>
+              )}
+              <p>
+                {[order.address.city, order.address.state, order.address.pincode]
+                  .filter(Boolean)
+                  .join(", ")}
+              </p>
+            </div>
+          ) : (
+            <p className="text-xs text-slate-500">Address recorded on order invoice.</p>
+          )}
+        </div>
+      </section>
+
       {/* Status history — vertical timeline */}
       <section className="mt-6">
         <div className="flex items-center justify-between mb-3">
@@ -280,6 +404,10 @@ export default function MyOrders() {
             <h2 className="font-display font-black text-3xl sm:text-4xl tracking-tight text-slate-900">
               Order history
             </h2>
+            <p className="text-xs text-slate-400 font-medium mt-1 flex items-center gap-1.5">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+              <span>Showing active orders from the last 90 days. Older historical records are securely archived.</span>
+            </p>
           </div>
           <button
             data-testid="my-orders-refresh"

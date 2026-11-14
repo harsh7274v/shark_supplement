@@ -376,6 +376,49 @@ catalogRoutes.get("/products", async (c: CatalogContext) => {
   return c.json(results.map(toProduct));
 });
 
+catalogRoutes.get("/sales/banner", async (c: CatalogContext) => {
+  const { results } = await c.env.DB
+    .prepare(
+      `SELECT p.id, p.name, p.sale_percentage, p.sale_starts_at, p.sale_ends_at
+       FROM products p
+       WHERE p.is_active = 1
+         AND p.sale_starts_at IS NOT NULL
+         AND p.sale_ends_at IS NOT NULL
+         AND datetime(p.sale_ends_at) > datetime('now')
+         AND (p.sale_percentage > 0 OR p.sale_price_override IS NOT NULL)
+       ORDER BY
+         CASE WHEN datetime(p.sale_starts_at) <= datetime('now') THEN 0 ELSE 1 END ASC,
+         p.sale_percentage DESC,
+         p.sale_starts_at ASC
+       LIMIT 1`,
+    )
+    .all<{
+      id: string;
+      name: string;
+      sale_percentage: number;
+      sale_starts_at: string;
+      sale_ends_at: string;
+    }>();
+
+  if (results.length === 0) {
+    return c.json({ active: false });
+  }
+
+  const sale = results[0];
+  const now = new Date();
+  const startsAt = new Date(sale.sale_starts_at);
+  const isLive = startsAt <= now;
+
+  return c.json({
+    active: true,
+    isLive,
+    startsAt: sale.sale_starts_at,
+    endsAt: sale.sale_ends_at,
+    percentage: sale.sale_percentage,
+    title: isLive ? "FLASH SALE IS LIVE" : "UPCOMING FLASH SALE",
+  });
+});
+
 catalogRoutes.get("/products/:id", async (c: CatalogContext) => {
   const row = await c.env.DB.prepare(
     `SELECT ${PRODUCT_COLUMNS}

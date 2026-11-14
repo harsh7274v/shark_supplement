@@ -35,7 +35,7 @@ export default function AuthModal() {
       const u = tab === "login"
         ? await login(form.email, form.password)
         : await register(form.name, form.email, form.password);
-      toast.success(`Welcome to Kinetic, ${u.name?.split(" ")[0] || "athlete"}`);
+      toast.success(`Welcome to TOM NUTRITION, ${u.name?.split(" ")[0] || "athlete"}`);
     } catch (err) {
       setError(formatApiError(err));
     } finally {

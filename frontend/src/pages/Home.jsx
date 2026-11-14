@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { API, scrollToSection } from "../lib/api";
-import { DEFAULT_CATEGORIES } from "../data/defaultCatalog";
+import { DEFAULT_CATEGORIES, DEFAULT_PRODUCTS } from "../data/defaultCatalog";
 import Header from "../components/Header";
 import Hero from "../components/Hero";
 import Marquee from "../components/Marquee";
@@ -10,11 +10,16 @@ import SaleSection from "../components/SaleSection";
 import ShopSection from "../components/ShopSection";
 import Footer from "../components/Footer";
 import CartDrawer from "../components/CartDrawer";
+import ProductDetailDrawer from "../components/ProductDetailDrawer";
 import AuthModal from "../components/AuthModal";
 
 export default function Home() {
   const [activeCategory, setActiveCategory] = useState("all");
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
+  const [newArrivalIds, setNewArrivalIds] = useState(() =>
+    DEFAULT_PRODUCTS.filter((p) => p.badge === "NEW").slice(0, 4).map((p) => p.id)
+  );
+  const [saleProductIds, setSaleProductIds] = useState([]);
 
   useEffect(() => {
     API.get("/categories")
@@ -31,6 +36,35 @@ export default function Home() {
     scrollToSection("shop");
   };
 
+  const handleNewArrivalsLoaded = useCallback((items) => {
+    if (Array.isArray(items)) {
+      const nextIds = items.map((p) => p.id);
+      setNewArrivalIds((prev) => {
+        if (prev.length === nextIds.length && prev.every((id, idx) => id === nextIds[idx])) {
+          return prev;
+        }
+        return nextIds;
+      });
+    }
+  }, []);
+
+  const handleSaleProductsLoaded = useCallback((items) => {
+    if (Array.isArray(items)) {
+      const nextIds = items.map((p) => p.id);
+      setSaleProductIds((prev) => {
+        if (prev.length === nextIds.length && prev.every((id, idx) => id === nextIds[idx])) {
+          return prev;
+        }
+        return nextIds;
+      });
+    }
+  }, []);
+
+  const excludeFromShop = useMemo(
+    () => [...new Set([...newArrivalIds, ...saleProductIds])],
+    [newArrivalIds, saleProductIds]
+  );
+
   return (
     <div id="top" className="min-h-screen bg-white">
       <Header onNavCategory={onNavCategory} />
@@ -38,11 +72,17 @@ export default function Home() {
         <Hero />
         <Marquee />
         <Categories categories={categories} activeCategory={activeCategory} onNavCategory={onNavCategory} />
-        <NewArrivals />
-        <SaleSection />
-        <ShopSection categories={categories} activeCategory={activeCategory} onNavCategory={onNavCategory} />
+        <NewArrivals onProductsLoaded={handleNewArrivalsLoaded} />
+        <SaleSection onProductsLoaded={handleSaleProductsLoaded} />
+        <ShopSection
+          categories={categories}
+          activeCategory={activeCategory}
+          onNavCategory={onNavCategory}
+          excludeIds={excludeFromShop}
+        />
       </main>
       <Footer categories={categories} onNavCategory={onNavCategory} />
+      <ProductDetailDrawer />
       <CartDrawer />
       <AuthModal />
     </div>

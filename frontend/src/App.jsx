@@ -59,8 +59,16 @@ function SmoothScroll() {
     };
   }, []);
   useEffect(() => {
-    if (window.__lenis) window.__lenis.scrollTo(0, { immediate: true });
-    else window.scrollTo(0, 0);
+    if (window.__lenis) {
+      if (location.pathname.startsWith("/admin")) {
+        window.__lenis.stop();
+      } else {
+        window.__lenis.start();
+        window.__lenis.scrollTo(0, { immediate: true });
+      }
+    } else if (!location.pathname.startsWith("/admin")) {
+      window.scrollTo(0, 0);
+    }
   }, [location.pathname]);
   return null;
 }

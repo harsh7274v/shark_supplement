@@ -6,6 +6,7 @@ const db = env.DB;
 /** Every table the schema migration must create. */
 const EXPECTED_TABLES = [
   "categories",
+  "coupon_redemptions",
   "coupons",
   "email_log",
   "login_attempts",

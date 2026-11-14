@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { X, MapPin, CreditCard, Banknote, Smartphone, Loader2, CheckCircle2, ArrowLeft } from "lucide-react";
+import { X, MapPin, CreditCard, Banknote, Smartphone, Loader2, CheckCircle2, ArrowLeft, LocateFixed } from "lucide-react";
 import { toast } from "sonner";
 import { API, formatApiError, inr } from "../lib/api";
 import { useCart } from "../context/CartContext";
+import { detectCurrentLocation } from "../lib/location";
 
 const EASE = [0.16, 1, 0.3, 1];
 const PAYMENT_METHODS = [
@@ -13,13 +14,36 @@ const PAYMENT_METHODS = [
 ];
 
 export default function CheckoutModal({ open, onClose }) {
-  const { items, coupon, subtotal, discount, gst, shipping, total, clearCart, setCartOpen, refreshCartPrices } = useCart();
+  const {
+    items,
+    coupon,
+    subtotal,
+    discount,
+    gst,
+    shipping,
+    total,
+    clearCart,
+    setCartOpen,
+    refreshCartPrices,
+    setShippingLocation,
+    isLocalJamshedpur,
+  } = useCart();
   const [step, setStep] = useState(1);
   const [payment, setPayment] = useState("cod");
   const [placing, setPlacing] = useState(false);
   const [placed, setPlaced] = useState(null);
-  const [form, setForm] = useState({ full_name: "", phone: "", email: "", address: "", city: "", pincode: "" });
+  const [form, setForm] = useState({
+    full_name: "",
+    phone: "",
+    email: "",
+    address: "",
+    landmark: "",
+    city: "",
+    state: "",
+    pincode: "",
+  });
   const [errors, setErrors] = useState({});
+  const [detectingLocation, setDetectingLocation] = useState(false);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -28,8 +52,49 @@ export default function CheckoutModal({ open, onClose }) {
     if (open) {
       refreshCartPrices();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, refreshCartPrices]);
+
+  const handleDetectLocation = async () => {
+    setDetectingLocation(true);
+    try {
+      const loc = await detectCurrentLocation();
+      setForm((prev) => ({
+        ...prev,
+        address: loc.address || prev.address,
+        landmark: loc.landmark || prev.landmark,
+        city: loc.city || prev.city,
+        state: loc.state || prev.state,
+        pincode: loc.pincode || prev.pincode,
+      }));
+      setShippingLocation?.(loc);
+      setErrors((prev) => ({
+        ...prev,
+        address: null,
+        landmark: null,
+        city: null,
+        state: null,
+        pincode: null,
+      }));
+      toast.success("Location auto-detected! Address details filled.");
+    } catch (err) {
+      toast.error(err.message || "Failed to detect location. Please fill manually.");
+    } finally {
+      setDetectingLocation(false);
+    }
+  };
+
+  useEffect(() => {
+    if (form.city || form.pincode || form.address || form.landmark) {
+      setShippingLocation?.((prev) => ({
+        ...prev,
+        city: form.city,
+        pincode: form.pincode,
+        address: form.address,
+        landmark: form.landmark,
+        state: form.state,
+      }));
+    }
+  }, [form.city, form.pincode, form.address, form.landmark, form.state, setShippingLocation]);
 
   const validate = () => {
     const errs = {};
@@ -38,6 +103,7 @@ export default function CheckoutModal({ open, onClose }) {
     if (!/^\S+@\S+\.\S+$/.test(form.email)) errs.email = "Enter a valid email";
     if (!form.address.trim()) errs.address = "Required";
     if (!form.city.trim()) errs.city = "Required";
+    if (!form.state.trim()) errs.state = "Required";
     if (!/^\d{6}$/.test(form.pincode)) errs.pincode = "6 digits";
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -107,6 +173,36 @@ export default function CheckoutModal({ open, onClose }) {
             <div className="flex-1 overflow-y-auto kinetic-scroll px-6 py-5" data-lenis-prevent>
               {step === 1 && (
                 <div className="space-y-3.5" data-testid="checkout-step-shipping">
+                  {/* Auto-detect Location Button placed above Full Name */}
+                  <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                        <MapPin className="w-3.5 h-3.5 text-kinetic-red" />
+                        Quick Auto-Fill
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-medium">GPS Geolocation</span>
+                    </div>
+                    <button
+                      type="button"
+                      data-testid="checkout-auto-locate-btn"
+                      onClick={handleDetectLocation}
+                      disabled={detectingLocation}
+                      className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-all shadow-xs disabled:opacity-70 active:scale-95"
+                    >
+                      {detectingLocation ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin text-kinetic-red" />
+                          <span>Detecting GPS Location…</span>
+                        </>
+                      ) : (
+                        <>
+                          <LocateFixed className="w-4 h-4 text-kinetic-red" />
+                          <span>Detect My Location &amp; Auto-Fill</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
                   <p className="text-sm font-bold text-slate-600 flex items-center gap-2">
                     <MapPin className="w-4 h-4 text-kinetic-red" /> Where should the gains land?
                   </p>
@@ -115,7 +211,9 @@ export default function CheckoutModal({ open, onClose }) {
                     { key: "phone", label: "Phone", ph: "9876543210" },
                     { key: "email", label: "Email", ph: "you@example.com" },
                     { key: "address", label: "Address", ph: "Flat 4, Iron Heights Gym Road" },
+                    { key: "landmark", label: "Landmark", ph: "Near Gold's Gym" },
                     { key: "city", label: "City", ph: "Mumbai" },
+                    { key: "state", label: "State", ph: "Maharashtra" },
                     { key: "pincode", label: "PIN code", ph: "400001" },
                   ].map(({ key, label, ph }) => (
                     <div key={key}>

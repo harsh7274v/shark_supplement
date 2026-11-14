@@ -19,6 +19,7 @@ interface CouponJson {
   discount_value: number;
   min_order: number;
   active: number;
+  single_use_per_user?: number;
 }
 
 async function adminToken(): Promise<string> {
@@ -174,6 +175,29 @@ describe("admin coupons", () => {
       expect(coupon.discount_type).toBe("flat");
       expect(coupon.discount_value).toBe(500);
       expect(coupon.active).toBe(1);
+    });
+
+    it("defaults single_use_per_user to 1 when creating coupon", async () => {
+      const coupon = await createCoupon({
+        code: "DEFAULT-SINGLE",
+        discount_type: "flat",
+        discount_value: 100,
+        min_order: 0,
+      });
+
+      expect(coupon.single_use_per_user).toBe(1);
+    });
+
+    it("allows creating a multi-use coupon when single_use_per_user is 0", async () => {
+      const coupon = await createCoupon({
+        code: "MULTI-USE",
+        discount_type: "flat",
+        discount_value: 100,
+        min_order: 0,
+        single_use_per_user: 0,
+      });
+
+      expect(coupon.single_use_per_user).toBe(0);
     });
 
     it("defaults the active flag to 1", async () => {

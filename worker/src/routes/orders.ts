@@ -19,7 +19,7 @@ import { orderPlacedEmail } from "../lib/email-templates";
 import { readJsonBody } from "../lib/http";
 import type { CouponRow, PricedItem } from "../lib/pricing";
 import { couponApplies, couponDiscount, priceOrder } from "../lib/pricing";
-import { effectiveVariantPrice, parseOptionMaps, type SaleProductColumns } from "../lib/sale";
+import { effectiveVariantPrice, isOnSale, parseOptionMaps, type SaleProductColumns } from "../lib/sale";
 import { getOptionalUser, requireAuth } from "../middleware/auth";
 
 type OrdersEnv = { Bindings: Env };
@@ -94,6 +94,8 @@ interface ShippingDetails {
   address: string;
   city: string;
   pincode: string;
+  landmark?: string;
+  state?: string;
 }
 
 /** An order row, as the database has it. */
@@ -115,6 +117,9 @@ interface OrderRow {
   estimated_delivery_date: string | null;
   created_at: string;
   updated_at: string;
+  courier_name?: string | null;
+  tracking_number?: string | null;
+  tracking_url?: string | null;
 }
 
 /** A line of an order, as the database has it. */
@@ -135,6 +140,16 @@ interface HistoryRow {
   order_id: string;
   status: string;
   note: string | null;
+  created_at: string;
+}
+
+/** A payment row, as the database has it. */
+interface PaymentRow {
+  id: string;
+  order_id: string;
+  method: string;
+  amount: number;
+  status: string;
   created_at: string;
 }
 
@@ -176,9 +191,18 @@ function readShipping(value: unknown): ShippingDetails | null {
     address: readString(raw.address),
     city: readString(raw.city),
     pincode: readString(raw.pincode),
+    landmark: readString(raw.landmark),
+    state: readString(raw.state),
   };
 
-  const missing = Object.values(details).some((field) => field === "");
+  const missing = [
+    details.full_name,
+    details.phone,
+    details.email,
+    details.address,
+    details.city,
+    details.pincode,
+  ].some((field) => field === "");
   return missing ? null : details;
 }
 
@@ -186,10 +210,73 @@ function readShipping(value: unknown): ShippingDetails | null {
 async function findCoupon(db: D1Database, code: string): Promise<CouponRow | null> {
   return db
     .prepare(
-      "SELECT code, discount_type, discount_value, min_order, active FROM coupons WHERE code = ?",
+      "SELECT code, discount_type, discount_value, min_order, active, single_use_per_user FROM coupons WHERE code = ?",
     )
     .bind(code)
     .first<CouponRow>();
+}
+
+/**
+ * Checks if a customer has already redeemed a single-use coupon in any non-cancelled order.
+ */
+async function hasUsedCoupon(
+  db: D1Database,
+  code: string,
+  userId: string | null,
+  email: string | null,
+  phone: string | null,
+): Promise<boolean> {
+  const cleanPhone = phone ? phone.trim().replace(/[\s\-()]/g, "") : "";
+  const identifiers = [
+    userId ? `user:${userId}` : "__none__",
+    email && email.trim() ? `email:${email.toLowerCase().trim()}` : "__none__",
+    cleanPhone ? `phone:${cleanPhone}` : "__none__",
+  ];
+
+  try {
+    const redemption = await db
+      .prepare(
+        "SELECT 1 FROM coupon_redemptions WHERE coupon_code = ? AND identifier IN (?, ?, ?) LIMIT 1",
+      )
+      .bind(code, ...identifiers)
+      .first();
+    if (redemption !== null) {
+      return true;
+    }
+  } catch {
+    // If table not migrated yet, continue to orders table fallback
+  }
+
+  const conditions: string[] = [];
+  const params: unknown[] = [code];
+
+  if (userId) {
+    conditions.push("user_id = ?");
+    params.push(userId);
+  }
+  if (email && email.trim()) {
+    conditions.push("LOWER(email) = LOWER(?)");
+    params.push(email.trim());
+  }
+  if (cleanPhone) {
+    conditions.push("REPLACE(REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '(', ''), ')', '') = ?");
+    params.push(cleanPhone);
+  }
+
+  if (conditions.length === 0) {
+    return false;
+  }
+
+  const query = `
+    SELECT id FROM orders
+    WHERE coupon_code = ?
+      AND (${conditions.join(" OR ")})
+      AND status != 'cancelled'
+    LIMIT 1
+  `;
+
+  const found = await db.prepare(query).bind(...params).first<{ id: string }>();
+  return found !== null;
 }
 
 /** The address of an order, read from the json blob of its column. */
@@ -210,9 +297,13 @@ function parseAddress(value: string | null): Record<string, string> | null {
 }
 
 /**
- * The orders of a buyer, oldest first, with their lines and their history.
+ * The orders of a buyer, oldest first, with their lines, history, and payment.
  *
- * The lines and the history come in two queries of their own, so the list
+ * Automatically filters orders within the last 90 days (3 months) to keep user
+ * storage optimized. Orders older than 90 days are archived from the customer view
+ * but preserved permanently in admin records for financial, tax and business audit.
+ *
+ * The lines, history, and payments come in queries of their own, so the list
  * never walks the orders one by one.
  */
 async function listOrders(db: D1Database, userId: string) {
@@ -220,8 +311,10 @@ async function listOrders(db: D1Database, userId: string) {
     .prepare(
       `SELECT id, order_number, user_id, name, email, phone, address, subtotal,
               discount, coupon_code, gst, shipping, total, status,
-              estimated_delivery_date, created_at, updated_at
-       FROM orders WHERE user_id = ?
+              estimated_delivery_date, created_at, updated_at,
+              courier_name, tracking_number, tracking_url
+       FROM orders
+       WHERE user_id = ? AND datetime(created_at) >= datetime('now', '-90 days')
        ORDER BY created_at ASC, id ASC`,
     )
     .bind(userId)
@@ -234,6 +327,7 @@ async function listOrders(db: D1Database, userId: string) {
   const ids = orderRows.map((order) => order.id);
   const itemRows: OrderItemRow[] = [];
   const historyRows: HistoryRow[] = [];
+  const paymentRows: PaymentRow[] = [];
 
   // D1 binds at most a hundred parameters in a query, so the ids go in
   // chunks. Every order is in one chunk, so the lines and the history of an
@@ -242,7 +336,7 @@ async function listOrders(db: D1Database, userId: string) {
   for (const chunk of chunks(ids, ID_CHUNK_SIZE)) {
     const placeholders = chunk.map(() => "?").join(", ");
 
-    const [items, history] = await Promise.all([
+    const [items, history, payments] = await Promise.all([
       db
         .prepare(
           `SELECT id, order_id, product_id, name, unit_price, qty, flavor, weight
@@ -259,56 +353,97 @@ async function listOrders(db: D1Database, userId: string) {
         )
         .bind(...chunk)
         .all<HistoryRow>(),
+      db
+        .prepare(
+          `SELECT id, order_id, method, amount, status, created_at
+           FROM payments WHERE order_id IN (${placeholders})
+           ORDER BY created_at DESC, id DESC`,
+        )
+        .bind(...chunk)
+        .all<PaymentRow>(),
     ]);
 
     itemRows.push(...items.results);
     historyRows.push(...history.results);
+    paymentRows.push(...payments.results);
   }
 
   const itemsByOrder = new Map<string, OrderItemRow[]>();
   for (const item of itemRows) {
-    itemsByOrder.set(item.order_id, [...(itemsByOrder.get(item.order_id) ?? []), item]);
+    const list = itemsByOrder.get(item.order_id);
+    if (list) {
+      list.push(item);
+    } else {
+      itemsByOrder.set(item.order_id, [item]);
+    }
   }
 
   const historyByOrder = new Map<string, HistoryRow[]>();
   for (const entry of historyRows) {
-    historyByOrder.set(entry.order_id, [...(historyByOrder.get(entry.order_id) ?? []), entry]);
+    const list = historyByOrder.get(entry.order_id);
+    if (list) {
+      list.push(entry);
+    } else {
+      historyByOrder.set(entry.order_id, [entry]);
+    }
   }
 
-  return orderRows.map((order) => ({
-    id: order.id,
-    order_number: order.order_number,
-    user_id: order.user_id,
-    name: order.name,
-    email: order.email,
-    phone: order.phone,
-    address: parseAddress(order.address),
-    subtotal: order.subtotal,
-    discount: order.discount,
-    coupon_code: order.coupon_code,
-    gst: order.gst,
-    shipping: order.shipping,
-    total: order.total,
-    status: order.status,
-    estimated_delivery_date: order.estimated_delivery_date,
-    created_at: order.created_at,
-    updated_at: order.updated_at,
-    items: (itemsByOrder.get(order.id) ?? []).map((item) => ({
-      id: item.id,
-      product_id: item.product_id,
-      name: item.name,
-      unit_price: item.unit_price,
-      qty: item.qty,
-      flavor: item.flavor,
-      weight: item.weight,
-    })),
-    status_history: (historyByOrder.get(order.id) ?? []).map((entry) => ({
-      id: entry.id,
-      status: entry.status,
-      note: entry.note,
-      created_at: entry.created_at,
-    })),
-  }));
+  const paymentByOrder = new Map<string, PaymentRow>();
+  for (const pay of paymentRows) {
+    if (!paymentByOrder.has(pay.order_id)) {
+      paymentByOrder.set(pay.order_id, pay);
+    }
+  }
+
+  return orderRows.map((order) => {
+    const payment = paymentByOrder.get(order.id) ?? null;
+    return {
+      id: order.id,
+      order_number: order.order_number,
+      user_id: order.user_id,
+      name: order.name,
+      email: order.email,
+      phone: order.phone,
+      address: parseAddress(order.address),
+      subtotal: order.subtotal,
+      discount: order.discount,
+      coupon_code: order.coupon_code,
+      gst: order.gst,
+      shipping: order.shipping,
+      total: order.total,
+      status: order.status,
+      estimated_delivery_date: order.estimated_delivery_date,
+      created_at: order.created_at,
+      updated_at: order.updated_at,
+      courier_name: order.courier_name ?? null,
+      tracking_number: order.tracking_number ?? null,
+      tracking_url: order.tracking_url ?? null,
+      payment: payment
+        ? {
+            id: payment.id,
+            method: payment.method,
+            amount: payment.amount,
+            status: payment.status,
+            created_at: payment.created_at,
+          }
+        : null,
+      items: (itemsByOrder.get(order.id) ?? []).map((item) => ({
+        id: item.id,
+        product_id: item.product_id,
+        name: item.name,
+        unit_price: item.unit_price,
+        qty: item.qty,
+        flavor: item.flavor,
+        weight: item.weight,
+      })),
+      status_history: (historyByOrder.get(order.id) ?? []).map((entry) => ({
+        id: entry.id,
+        status: entry.status,
+        note: entry.note,
+        created_at: entry.created_at,
+      })),
+    };
+  });
 }
 
 /**
@@ -337,6 +472,10 @@ async function undoOrder(
 
   await db.batch([
     ...restore,
+    db.prepare("DELETE FROM coupon_redemptions WHERE order_id = ?").bind(orderId),
+    db.prepare("DELETE FROM order_items WHERE order_id = ?").bind(orderId),
+    db.prepare("DELETE FROM payments WHERE order_id = ?").bind(orderId),
+    db.prepare("DELETE FROM order_status_history WHERE order_id = ?").bind(orderId),
     db.prepare("DELETE FROM orders WHERE id = ?").bind(orderId),
   ]);
 }
@@ -353,16 +492,72 @@ ordersRoutes.post("/coupons/validate", async (c: OrdersContext) => {
       ? Math.max(0, Math.round(body.subtotal))
       : null;
 
+  const eligibleSubtotal =
+    typeof body.eligible_subtotal === "number" && Number.isFinite(body.eligible_subtotal)
+      ? Math.max(0, Math.round(body.eligible_subtotal))
+      : subtotal;
+
   if (!code || subtotal === null) {
     return c.json({ detail: INVALID_BODY }, 400);
   }
 
   const coupon = await findCoupon(c.env.DB, code);
-  if (!coupon || !couponApplies(coupon, subtotal)) {
+  if (!coupon || coupon.active !== 1) {
     return c.json({ valid: false });
   }
 
-  return c.json({ valid: true, code: coupon.code, discount: couponDiscount(coupon, subtotal) });
+  if (subtotal < coupon.min_order) {
+    const minRupees = Math.round(coupon.min_order / 100);
+    return c.json({
+      valid: false,
+      detail: `Minimum order of ₹${minRupees.toLocaleString("en-IN")} required for coupon ${coupon.code}`,
+    });
+  }
+
+  if (eligibleSubtotal !== null && eligibleSubtotal <= 0) {
+    return c.json({
+      valid: false,
+      detail: "Coupons cannot be applied to products currently on sale.",
+    });
+  }
+
+  if (eligibleSubtotal !== null && eligibleSubtotal < coupon.min_order) {
+    const minRupees = Math.round(coupon.min_order / 100);
+    return c.json({
+      valid: false,
+      detail: `Minimum eligible items subtotal of ₹${minRupees.toLocaleString("en-IN")} required for coupon ${coupon.code}`,
+    });
+  }
+
+  // Check single-use per customer
+  const user = await getOptionalUser(c);
+  let email = readString(body.email) || null;
+  if (!email && user?.user_id) {
+    const userRow = await c.env.DB.prepare("SELECT email FROM users WHERE id = ?")
+      .bind(user.user_id)
+      .first<{ email: string }>();
+    if (userRow?.email) {
+      email = userRow.email;
+    }
+  }
+  const phone = readString(body.phone) || null;
+  const userId = user?.user_id || null;
+
+  if (coupon.single_use_per_user === 1 && (userId || email || phone)) {
+    const alreadyUsed = await hasUsedCoupon(c.env.DB, coupon.code, userId, email, phone);
+    if (alreadyUsed) {
+      return c.json({
+        valid: false,
+        detail: "You have already used this coupon code.",
+      });
+    }
+  }
+
+  return c.json({
+    valid: true,
+    code: coupon.code,
+    discount: couponDiscount(coupon, eligibleSubtotal ?? subtotal),
+  });
 });
 
 ordersRoutes.post("/orders", async (c: OrdersContext) => {
@@ -441,6 +636,7 @@ ordersRoutes.post("/orders", async (c: OrdersContext) => {
       return c.json({ detail: `Product ${item.product_id} not found` }, 400);
     }
 
+    const onSale = isOnSale(product, new Date());
     lines.push({
       item,
       priced: {
@@ -454,6 +650,7 @@ ordersRoutes.post("/orders", async (c: OrdersContext) => {
         qty: item.qty,
         flavor: item.flavor,
         weight: item.weight,
+        is_on_sale: onSale,
       },
     });
     wantedQty.set(item.product_id, (wantedQty.get(item.product_id) ?? 0) + item.qty);
@@ -473,16 +670,50 @@ ordersRoutes.post("/orders", async (c: OrdersContext) => {
   // the old API did.
   const couponCode = readString(body.coupon_code).toUpperCase();
   const coupon = couponCode ? await findCoupon(c.env.DB, couponCode) : null;
-  const prices = priceOrder(pricedItems, coupon);
-  const appliedCoupon = couponApplies(coupon, prices.subtotal) ? coupon : null;
-
   const user = await getOptionalUser(c);
+
+  if (coupon && coupon.single_use_per_user === 1) {
+    const alreadyUsed = await hasUsedCoupon(
+      c.env.DB,
+      coupon.code,
+      user?.user_id ?? null,
+      shipping.email,
+      shipping.phone,
+    );
+    if (alreadyUsed) {
+      return c.json({ detail: "You have already used this coupon code." }, 400);
+    }
+  }
+
+  const prices = priceOrder(pricedItems, coupon, shipping);
+  const appliedCoupon = prices.discount > 0 ? coupon : null;
+
   const orderId = newId("ord");
   const address = JSON.stringify(shipping);
   const delivery = estimatedDeliveryDate();
   const now = new Date().toISOString();
 
   const stockUpdates = [...wantedQty.entries()];
+
+  const redemptionStatements: D1PreparedStatement[] = [];
+  if (appliedCoupon && appliedCoupon.single_use_per_user === 1) {
+    const identifiers: string[] = [];
+    if (user?.user_id) identifiers.push(`user:${user.user_id}`);
+    if (shipping.email?.trim()) identifiers.push(`email:${shipping.email.toLowerCase().trim()}`);
+    const cleanPhone = (shipping.phone || "").replace(/[\s\-()]/g, "");
+    if (cleanPhone) identifiers.push(`phone:${cleanPhone}`);
+
+    for (const ident of identifiers) {
+      redemptionStatements.push(
+        c.env.DB
+          .prepare(
+            `INSERT INTO coupon_redemptions (coupon_code, identifier, order_id, created_at)
+             VALUES (?, ?, ?, ?)`,
+          )
+          .bind(appliedCoupon.code, ident, orderId, now),
+      );
+    }
+  }
 
   // The order and everything that belongs to it, in one transaction.
   const statements = [
@@ -496,14 +727,16 @@ ordersRoutes.post("/orders", async (c: OrdersContext) => {
         )
         .bind(qty, qty, productId, qty),
     ),
-    // The number of the order is counted inside the transaction, so two
-    // orders that arrive at the same time cannot share a number.
+    // Atomic redemption tracking to block concurrent checkout races on single-use coupons.
+    ...redemptionStatements,
+    // The number of the order is derived from the highest existing order number,
+    // so deleting or cleaning up old orders cannot cause a number collision.
     c.env.DB
       .prepare(
         `INSERT INTO orders (id, order_number, user_id, name, email, phone, address,
            subtotal, discount, coupon_code, gst, shipping, total, status,
            estimated_delivery_date, created_at, updated_at)
-         VALUES (?, 'KN-' || (CAST(? AS INTEGER) + (SELECT COUNT(*) FROM orders)), ?, ?, ?, ?, ?,
+         VALUES (?, 'KN-' || (SELECT COALESCE(MAX(CAST(SUBSTR(order_number, 4) AS INTEGER)), CAST(? AS INTEGER) - 1) + 1 FROM orders), ?, ?, ?, ?, ?,
            ?, ?, ?, ?, ?, ?, 'placed', ?, ?, ?)`,
       )
       .bind(
@@ -557,7 +790,18 @@ ordersRoutes.post("/orders", async (c: OrdersContext) => {
       .bind(newId("hist"), orderId, "Order placed"),
   ];
 
-  const results = await c.env.DB.batch(statements);
+  let results: D1Result[];
+  try {
+    results = await c.env.DB.batch(statements);
+  } catch (error) {
+    if (
+      String(error).includes("UNIQUE constraint failed") &&
+      String(error).includes("coupon_redemptions")
+    ) {
+      return c.json({ detail: "You have already used this coupon code." }, 400);
+    }
+    throw error;
+  }
 
   // The stock of a product can be taken by another order between the check
   // and the write. When that happens the order is undone. Every product that

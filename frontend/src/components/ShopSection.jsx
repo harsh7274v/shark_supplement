@@ -57,40 +57,60 @@ export function SortDropdown({ sort, onSort }) {
   );
 }
 
-export default function ShopSection({ categories, activeCategory, onNavCategory }) {
+function dedupeById(list) {
+  const seen = new Set();
+  return list.filter((item) => {
+    if (!item?.id || seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+
+const getInitialShopProducts = (exclude = []) => {
+  const sorted = [...DEFAULT_PRODUCTS].sort((a, b) => (b.orders_count || 0) - (a.orders_count || 0));
+  const filtered = sorted.filter((p) => !exclude.includes(p.id) && p.badge !== "NEW");
+  return dedupeById(filtered.length > 0 ? filtered : sorted);
+};
+
+export default function ShopSection({ categories, activeCategory, onNavCategory, excludeIds = [] }) {
   const [sort, setSort] = useState("most_ordered");
-  const [products, setProducts] = useState(DEFAULT_PRODUCTS);
+  const [products, setProducts] = useState(() => getInitialShopProducts(excludeIds));
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    const params = { sort, limit: 8 };
-    if (activeCategory && activeCategory !== "all") params.category = activeCategory;
+    // When showing 'all', ask for up to 16 products so that excluding the ones
+    // in New Arrivals / Sale still leaves plenty to fill the 8-card grid.
+    const isAll = !activeCategory || activeCategory === "all";
+    const params = { sort, limit: isAll ? 16 : 8 };
+    if (!isAll) params.category = activeCategory;
 
     const fallbackFilter = () => {
       let list = [...DEFAULT_PRODUCTS];
-      if (activeCategory && activeCategory !== "all") {
+      if (!isAll) {
         list = list.filter((p) => p.category === activeCategory);
+      } else if (excludeIds.length > 0) {
+        list = list.filter((p) => !excludeIds.includes(p.id));
       }
       if (sort === "price_asc") list.sort((a, b) => a.price - b.price);
       else if (sort === "price_desc") list.sort((a, b) => b.price - a.price);
       else if (sort === "top_rated") list.sort((a, b) => b.rating - a.rating);
       else list.sort((a, b) => b.orders_count - a.orders_count);
-      return list;
+      return dedupeById(list);
     };
 
     API.get("/products", { params })
       .then((r) => {
-        if (alive && Array.isArray(r.data) && r.data.length > 0) {
-          setProducts(r.data);
+        if (alive && Array.isArray(r.data)) {
+          setProducts(dedupeById(r.data));
         } else if (alive) {
-          setProducts(fallbackFilter());
+          setProducts([]);
         }
       })
       .catch(() => {
         if (alive) {
-          setProducts(fallbackFilter());
+          setProducts([]);
         }
       })
       .finally(() => {
@@ -102,6 +122,12 @@ export default function ShopSection({ categories, activeCategory, onNavCategory 
   const title = !activeCategory || activeCategory === "all"
     ? "Best Sellers"
     : categories.find((c) => c.slug === activeCategory)?.name || "Products";
+
+  const isAll = !activeCategory || activeCategory === "all";
+  const unexcluded = isAll && excludeIds.length > 0
+    ? products.filter((p) => !excludeIds.includes(p.id))
+    : products;
+  const displayProducts = (unexcluded.length > 0 ? unexcluded : products).slice(0, 8);
 
   return (
     <section id="shop" className="py-20 lg:py-24 bg-slate-50/70 border-y border-slate-100" data-testid="shop-section">
@@ -144,7 +170,7 @@ export default function ShopSection({ categories, activeCategory, onNavCategory 
           })}
         </div>
 
-        {loading ? (
+        {loading && products.length === 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6" data-testid="shop-loading-skeleton">
             {Array.from({ length: 4 }).map((_, i) => (
               <div key={i} className="rounded-3xl bg-white border border-slate-100 overflow-hidden">
@@ -157,14 +183,14 @@ export default function ShopSection({ categories, activeCategory, onNavCategory 
               </div>
             ))}
           </div>
-        ) : products.length === 0 ? (
+        ) : displayProducts.length === 0 ? (
           <div className="py-16 text-center">
             <p className="font-display font-bold text-xl text-slate-900">No products here yet</p>
             <p className="text-slate-500 mt-1">Try another category — new stock drops every week.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6" data-testid="shop-grid">
-            {products.map((p, i) => (
+            {displayProducts.map((p, i) => (
               <ProductCard key={p.id} product={p} index={i} />
             ))}
           </div>

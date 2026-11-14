@@ -264,12 +264,12 @@ googleAuthRoutes.get("/callback", async (c) => {
     return c.json({ detail: SIGN_IN_FAILED }, 502);
   }
 
-  // The email is the key of the account. Google only issues an id token for
-  // an account it has verified, so the `email_verified` claim is read but not
-  // enforced.
+  // The email is the key of the account. To prevent account takeover, the
+  // email MUST be explicitly verified by Google before linking or sign-in.
+  const emailVerified = claims.email_verified === true || claims.email_verified === "true";
   const email = (textClaim(claims.email) ?? "").toLowerCase();
-  if (!email) {
-    return c.json({ detail: SIGN_IN_FAILED }, 502);
+  if (!emailVerified || !email) {
+    return c.json({ detail: "Google account email is not verified" }, 403);
   }
 
   const user = await upsertGoogleUser(c.env.DB, {

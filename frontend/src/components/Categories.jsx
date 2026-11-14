@@ -3,6 +3,32 @@ import { ArrowUpRight } from "lucide-react";
 
 const EASE = [0.16, 1, 0.3, 1];
 
+export const CATEGORY_FALLBACK_IMAGES = {
+  proteins: "/api/images/catalog/category_proteins.jpg",
+  gainers: "/api/images/catalog/category_gainers.jpg",
+  pre_post: "/api/images/catalog/category_pre_post.jpg",
+  "pre-post": "/api/images/catalog/category_pre_post.jpg",
+  ayurveda: "/api/images/catalog/category_ayurveda.jpg",
+  fit_foods: "/api/images/catalog/category_fit_foods.jpg",
+  "fit-foods": "/api/images/catalog/category_fit_foods.jpg",
+  vitamins: "/api/images/catalog/category_vitamins.jpg",
+  fat_loss: "/api/images/catalog/category_fat_loss.jpg",
+  "fat-loss": "/api/images/catalog/category_fat_loss.jpg",
+  apparel: "/api/images/catalog/category_apparel.jpg",
+  aminos: "/api/images/catalog/category_aminos.jpg",
+  "gym-gear": "/api/images/catalog/category_gym_gear.jpg",
+  gym_gear: "/api/images/catalog/category_gym_gear.jpg",
+};
+
+export function resolveCategoryImage(cat) {
+  if (!cat) return "/api/images/catalog/category_proteins.jpg";
+  const url = cat.image_url || cat.image;
+  if (url && !url.includes("/seed/")) {
+    return url;
+  }
+  return CATEGORY_FALLBACK_IMAGES[cat.slug] || "/api/images/catalog/category_proteins.jpg";
+}
+
 export default function Categories({ categories, activeCategory, onNavCategory }) {
   return (
     <section id="categories" className="py-20 lg:py-24" data-testid="categories-section">
@@ -34,7 +60,7 @@ export default function Categories({ categories, activeCategory, onNavCategory }
           </motion.button>
         </div>
 
-        <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-x-4 gap-y-8 sm:gap-x-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-5 xl:grid-cols-10 gap-x-4 gap-y-8 sm:gap-x-6">
           {categories.map((cat, i) => {
             const active = activeCategory === cat.slug;
             return (
@@ -58,9 +84,15 @@ export default function Categories({ categories, activeCategory, onNavCategory }
                   }`}
                 >
                   <img
-                    src={cat.image_url ?? cat.image}
+                    src={resolveCategoryImage(cat)}
                     alt={cat.name}
                     loading="lazy"
+                    onError={(e) => {
+                      const fallback = CATEGORY_FALLBACK_IMAGES[cat.slug] || "/api/images/catalog/whey_isolate.jpg";
+                      if (e.currentTarget.src !== fallback && !e.currentTarget.src.endsWith(fallback)) {
+                        e.currentTarget.src = fallback;
+                      }
+                    }}
                     className="w-full h-full object-cover group-hover:scale-110 group-hover:rotate-3 transition-transform duration-500"
                   />
                   {active && (

@@ -399,6 +399,18 @@ describe("google sign-in", () => {
       expect(await res.json()).toEqual({ detail: "Google sign-in not configured" });
     });
 
+    it("answers 403 when the Google account email is not verified", async () => {
+      const email = uniqueEmail();
+      const claims = { ...googleClaims(email), email_verified: false };
+      vi.stubGlobal("fetch", mockGoogleToken(fakeIdToken(claims)));
+
+      const { state, stateCookie } = await startSignIn();
+      const res = await completeSignIn({ code: "google-code", state, stateCookie });
+
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ detail: "Google account email is not verified" });
+    });
+
     it("spends the state, so it cannot be replayed", async () => {
       vi.stubGlobal("fetch", mockGoogleToken(fakeIdToken(googleClaims(uniqueEmail()))));
 

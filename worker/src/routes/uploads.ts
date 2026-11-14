@@ -115,6 +115,44 @@ function imageKey(contentType: string): string {
   return `${IMAGE_FOLDER}/${crypto.randomUUID()}.${extensionOf(contentType)}`;
 }
 
+/**
+ * Validates file magic bytes to verify that uploaded content is genuinely an image
+ * and not an executable, script or arbitrary binary file disguised with an image MIME type.
+ */
+function isValidImageBytes(bytes: Uint8Array): boolean {
+  if (bytes.length < 4) return false;
+  // PNG: 89 50 4E 47
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return true;
+  // JPEG: FF D8 FF
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return true;
+  // GIF: 47 49 46 38
+  if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) return true;
+  // BMP: 42 4D
+  if (bytes[0] === 0x42 && bytes[1] === 0x4d) return true;
+  // TIFF: 49 49 2A 00 or 4D 4D 00 2A
+  if (
+    (bytes[0] === 0x49 && bytes[1] === 0x49 && bytes[2] === 0x2a) ||
+    (bytes[0] === 0x4d && bytes[1] === 0x4d && bytes[3] === 0x2a)
+  ) return true;
+  // WebP: RIFF....WEBP
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
+  ) return true;
+  // AVIF: ftyp
+  if (bytes.length >= 12 && new TextDecoder().decode(bytes.slice(4, 12)).includes("ftyp")) return true;
+  // ICO: 00 00 01 00
+  if (bytes[0] === 0x00 && bytes[1] === 0x00 && (bytes[2] === 0x01 || bytes[2] === 0x02)) return true;
+  // SVG: starts with < (xml or svg)
+  const header = new TextDecoder().decode(bytes.slice(0, 256)).toLowerCase().trim();
+  if (header.startsWith("<?xml") || header.startsWith("<svg") || header.includes("<svg")) {
+    if (header.includes("<script") || header.includes("onload=") || header.includes("onerror=")) return false;
+    return true;
+  }
+  return false;
+}
+
 uploadRoutes.post("/admin/uploads", requireAdmin, async (c: UploadsContext) => {
   // A body that is over the limit is refused before it is read, so a huge
   // upload cannot fill the memory of the worker.
@@ -145,16 +183,22 @@ uploadRoutes.post("/admin/uploads", requireAdmin, async (c: UploadsContext) => {
     return c.json({ detail: FILE_TOO_LARGE }, 413);
   }
 
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  if (!isValidImageBytes(bytes)) {
+    return c.json({ detail: NOT_AN_IMAGE }, 400);
+  }
+
   const key = imageKey(contentType);
-  await c.env.IMAGES.put(key, await file.arrayBuffer(), {
+  await c.env.IMAGES.put(key, buffer, {
     httpMetadata: { contentType, cacheControl: CACHE_CONTROL },
   });
 
   return c.json({ url: `/api${IMAGE_PATH}/${key}` });
 });
 
-// The key of an image has a folder in it (`products/<uuid>.png`), so the
-// parameter takes the slashes of the path as well.
+// The key of an image has a folder in it (`products/<uuid>.png` or `catalog/<name>.jpg`),
+// so the parameter takes the slashes of the path as well.
 uploadRoutes.get(`${IMAGE_PATH}/:key{.+}`, async (c: UploadsContext) => {
   const key = c.req.param("key");
   const object = key ? await c.env.IMAGES.get(key) : null;
@@ -162,9 +206,20 @@ uploadRoutes.get(`${IMAGE_PATH}/:key{.+}`, async (c: UploadsContext) => {
     return c.json({ detail: IMAGE_NOT_FOUND }, 404);
   }
 
+  const rawType = object.httpMetadata?.contentType;
+  let contentType = rawType && rawType !== "application/octet-stream" ? rawType : "application/octet-stream";
+  if (contentType === "application/octet-stream" && key) {
+    const ext = key.split(".").pop()?.toLowerCase();
+    if (ext === "jpg" || ext === "jpeg") contentType = "image/jpeg";
+    else if (ext === "png") contentType = "image/png";
+    else if (ext === "webp") contentType = "image/webp";
+    else if (ext === "gif") contentType = "image/gif";
+    else if (ext === "svg") contentType = "image/svg+xml";
+  }
+
   return new Response(object.body, {
     headers: {
-      "Content-Type": object.httpMetadata?.contentType ?? "application/octet-stream",
+      "Content-Type": contentType,
       "Cache-Control": CACHE_CONTROL,
       // The bytes of the bucket are not trusted: an image that is really a
       // page with a script in it must not run in the origin of the store

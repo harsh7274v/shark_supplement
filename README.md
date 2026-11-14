@@ -86,12 +86,30 @@ wrangler login
 
 ```bash
 wrangler d1 create kinetic-db
-wrangler r2 create kinetic-images
+wrangler r2 bucket create kinetic-images
 ```
 
 Update `worker/wrangler.jsonc` with the returned `database_id` for `kinetic-db` (the `IMAGES` bucket binding needs no ID).
 
-### 3. Set secrets
+### 3. Run migrations and seed remote D1 database
+
+```bash
+cd worker
+npx wrangler d1 execute kinetic-db --remote --file=migrations/0001_schema.sql
+npx wrangler d1 execute kinetic-db --remote --file=migrations/0002_storefront_variants_sales.sql
+npx wrangler d1 execute kinetic-db --remote --file=seed/001_catalog.sql
+```
+
+### 4. Upload all catalog images to Cloudflare R2 object storage
+
+```bash
+cd worker
+npm run sync:images:remote
+```
+
+This synchronizes all 17 product, category, and banner images from `frontend/public/images/` directly into the remote `kinetic-images` R2 bucket under `catalog/`, served via `/api/images/catalog/...`.
+
+### 5. Set secrets
 
 ```bash
 wrangler secret put JWT_SECRET
@@ -108,18 +126,19 @@ wrangler secret put SMTP_FROM
 
 See `worker/.dev.vars.example` for what each variable does.
 
-### 4. Deploy the Worker API
+### 6. Deploy the Worker API
 
 ```bash
 cd worker
 wrangler deploy
 ```
 
-### 5. Deploy the Pages frontend
+### 7. Deploy the Pages frontend
 
 ```bash
 cd frontend
-wrangler pages deploy build
+npm run build
+wrangler pages deploy dist
 ```
 
 `wrangler.toml` binds Pages functions at `/api/*` to the `kinetic-api` Worker service via `[[services]] binding = "API"`, so the frontend and API share one Pages domain.

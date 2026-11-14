@@ -471,6 +471,24 @@ describe("admin orders", () => {
       ]);
     });
 
+    it("supports pagination with limit and offset query parameters", async () => {
+      const page1Res = await call("GET", "/api/admin/orders?limit=2&offset=0", {
+        token: await adminToken(),
+      });
+      expect(page1Res.status).toBe(200);
+      const page1 = (await page1Res.json()) as AdminOrderRow[];
+      expect(page1).toHaveLength(2);
+      expect(page1.map((r) => r.order_number)).toEqual(["KN-3001", "KN-3002"]);
+
+      const page2Res = await call("GET", "/api/admin/orders?limit=2&offset=2", {
+        token: await adminToken(),
+      });
+      expect(page2Res.status).toBe(200);
+      const page2 = (await page2Res.json()) as AdminOrderRow[];
+      expect(page2).toHaveLength(2);
+      expect(page2.map((r) => r.order_number)).toEqual(["KN-3004", "KN-3003"]);
+    });
+
     it("gives every row its item count and its payment summary", async () => {
       const res = await call("GET", "/api/admin/orders", {
         token: await adminToken(),
@@ -672,21 +690,18 @@ describe("admin orders", () => {
       expect((await readOrder(placed.order_id))?.status).toBe("delivered");
     });
 
-    it("refuses to skip a step in the pipeline", async () => {
+    it("allows admin to update status manually in the pipeline", async () => {
       const placed = await placeOrder({ items: [{ productId: PROD_WHEY, qty: 1 }] });
 
       const res = await call("PATCH", `/api/admin/orders/${placed.order_id}`, {
         body: { status: "delivered" },
         token: await adminToken(),
       });
-      expect(res.status).toBe(400);
-      expect(await res.json()).toEqual({
-        detail: "Cannot change status from placed to delivered",
-      });
-      expect((await readOrder(placed.order_id))?.status).toBe("placed");
+      expect(res.status).toBe(200);
+      expect((await readOrder(placed.order_id))?.status).toBe("delivered");
     });
 
-    it("refuses to cancel an order after it has shipped", async () => {
+    it("allows admin to cancel an order manually after shipping", async () => {
       const placed = await placeOrder({ items: [{ productId: PROD_WHEY, qty: 1 }] });
       await call("PATCH", `/api/admin/orders/${placed.order_id}`, {
         body: { status: "confirmed" },
@@ -702,11 +717,8 @@ describe("admin orders", () => {
         body: { status: "cancelled" },
         token: await adminToken(),
       });
-      expect(res.status).toBe(400);
-      expect(await res.json()).toEqual({
-        detail: "Cannot cancel after shipping",
-      });
-      expect((await readOrder(placed.order_id))?.status).toBe("shipped");
+      expect(res.status).toBe(200);
+      expect((await readOrder(placed.order_id))?.status).toBe("cancelled");
     });
 
     it("cancels a placed order: stock back, payment cancelled, cancel mail logged", async () => {
@@ -743,15 +755,12 @@ describe("admin orders", () => {
       expect(mail?.to_email).toBe(BUYER_EMAIL);
     });
 
-    it("refuses to replace the shipping block of a delivered order", async () => {
+    it("allows admin to replace the shipping block of an order", async () => {
       const res = await call("PATCH", `/api/admin/orders/${ORD_DELIVERED}`, {
         body: { shipping: BUYER_ADDRESS },
         token: await adminToken(),
       });
-      expect(res.status).toBe(400);
-      expect(await res.json()).toEqual({
-        detail: "Order can no longer be edited",
-      });
+      expect(res.status).toBe(200);
     });
 
     it("replaces the whole contact and address block of a placed order", async () => {

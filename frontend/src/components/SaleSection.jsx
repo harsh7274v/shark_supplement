@@ -6,7 +6,16 @@ import ProductCard from "./ProductCard";
 
 const EASE = [0.16, 1, 0.3, 1];
 
-export default function SaleSection() {
+function dedupeById(list) {
+  const seen = new Set();
+  return list.filter((item) => {
+    if (!item?.id || seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+
+export default function SaleSection({ onProductsLoaded }) {
   const [products, setProducts] = useState([]);
 
   useEffect(() => {
@@ -15,14 +24,16 @@ export default function SaleSection() {
     API.get("/products", { params: { on_sale: "1", sort: "newest", limit: 8 } })
       .then((r) => {
         if (alive && Array.isArray(r.data)) {
-          setProducts(r.data);
+          const clean = dedupeById(r.data);
+          setProducts(clean);
+          onProductsLoaded?.(clean);
         }
       })
       .catch(() => {});
     return () => {
       alive = false;
     };
-  }, []);
+  }, [onProductsLoaded]);
 
   if (products.length === 0) {
     return null;

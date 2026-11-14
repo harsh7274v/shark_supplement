@@ -108,7 +108,7 @@ export default function Footer({ categories, onNavCategory }) {
         </div>
 
         <div className="pt-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-semibold text-white/40">
-          <p>© 2026 Kinetic Nutrition. All rights reserved.</p>
+          <p>© 2026 TOM NUTRITION. All rights reserved.</p>
           <p>100% Lab Tested · Zero Banned Substances · Made for the Relentless</p>
         </div>
       </div>

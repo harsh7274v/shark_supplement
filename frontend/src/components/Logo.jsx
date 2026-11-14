@@ -11,12 +11,12 @@ export default function Logo({ size = 36, onHome }) {
       data-testid="logo-home-btn"
       onClick={onHome}
       className="flex items-center gap-2.5 shrink-0"
-      aria-label="Kinetic Nutrition home"
+      aria-label="TOM NUTRITION home"
     >
       <LogoMark size={size} />
       <span className="flex flex-col items-start leading-none">
         <span className="font-display font-black text-lg tracking-tight text-slate-900">
-          KINETIC
+          TOM
         </span>
         <span className="text-[9px] font-extrabold tracking-[0.42em] text-kinetic-red mt-0.5">
           NUTRITION

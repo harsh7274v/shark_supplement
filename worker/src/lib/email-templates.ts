@@ -20,6 +20,9 @@ export interface OrderForEmail {
   total: number;
   /** The day the order is expected to be delivered, when it is known. */
   estimated_delivery_date?: string | null;
+  courier_name?: string | null;
+  tracking_number?: string | null;
+  tracking_url?: string | null;
 }
 
 /** A line of an order as the templates need it. */
@@ -125,6 +128,24 @@ export function orderPlacedEmail(order: OrderForEmail, items: ItemForEmail[]): M
   };
 }
 
+/** The courier tracking block, when the order has courier or tracking info. */
+function trackingLine(order: OrderForEmail): string {
+  if (!order.courier_name && !order.tracking_number && !order.tracking_url) {
+    return "";
+  }
+  const parts: string[] = [];
+  if (order.courier_name) {
+    parts.push(`Courier: <strong>${escapeHtml(order.courier_name)}</strong>`);
+  }
+  if (order.tracking_number) {
+    parts.push(`Tracking ID: <strong>${escapeHtml(order.tracking_number)}</strong>`);
+  }
+  if (order.tracking_url && /^https?:\/\//i.test(order.tracking_url)) {
+    parts.push(`<a href="${escapeHtml(order.tracking_url)}" style="color: #ff3344; font-weight: bold; text-decoration: underline;">Track Shipment &rarr;</a>`);
+  }
+  return `<div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px; margin: 12px 0;"><p style="margin: 0; font-size: 13px;">${parts.join(" &bull; ")}</p></div>`;
+}
+
 /**
  * The mail that tells the buyer that the status of the order has changed.
  *
@@ -145,6 +166,7 @@ export function orderStatusEmail(
     `<p>${escapeHtml(line)}</p>` +
     `<p>Order <strong>${escapeHtml(order.order_number)}</strong></p>` +
     deliveryLine(delivery) +
+    trackingLine(order) +
     totalsTable(order);
 
   return {

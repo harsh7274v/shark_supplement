@@ -113,7 +113,7 @@ describe("seed data", () => {
       ]);
       expect(categories.find((c) => c.slug === "proteins")).toMatchObject({
         slug: "proteins",
-        image_url: "/api/images/seed/proteins.jpg",
+        image_url: "/api/images/catalog/whey_isolate.jpg",
         tagline: "Whey, isolate & plant protein",
       });
     });

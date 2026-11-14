@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Plus, Trash2, Edit2, RefreshCw, Image as ImageIcon } from "lucide-react";
+import { Plus, Trash2, Edit2, RefreshCw, Image as ImageIcon, X } from "lucide-react";
 import { API, formatApiError } from "../../lib/api";
 import { toast } from "sonner";
+import { CATEGORY_FALLBACK_IMAGES } from "../../components/Categories";
 
 export default function Categories() {
   const [items, setItems] = useState([]);
@@ -164,7 +165,7 @@ export default function Categories() {
             data-testid="admin-refresh-categories"
             onClick={fetchCategories}
             disabled={refreshing}
-            className="w-9 h-9 rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+            className="w-9 h-9 rounded-2xl border border-slate-200 bg-[#F6F7F9] text-slate-600 hover:text-slate-900 hover:bg-slate-100 shadow-xs flex items-center justify-center disabled:opacity-50 transition-colors"
             title="Refresh"
           >
             <RefreshCw className="w-4 h-4" />
@@ -176,14 +177,15 @@ export default function Categories() {
               setForm({ name: "", slug: "", image_url: "", tagline: "", sort_order: "" });
               setOpen(true);
             }}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-kinetic-red text-white text-sm font-bold hover:bg-red-600 transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-2xl bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 shadow-sm transition-all"
           >
             <Plus className="w-4 h-4" /> Add category
           </button>
         </div>
       </motion.div>
 
-      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      {/* Categories Grid Box - Dusky White Box */}
+      <div className="rounded-3xl border border-slate-200/80 bg-[#F6F7F9] shadow-sm overflow-hidden p-6">
         <AnimatePresence>
           {loading ? (
             <div key="loading" data-testid="admin-categories-loading" className="flex h-80 items-center justify-center text-slate-400 px-6">
@@ -192,22 +194,28 @@ export default function Categories() {
           ) : (
             <div key="grid">
               {items.length === 0 ? (
-                <div data-testid="admin-categories-empty" className="p-12 text-center text-slate-500">
+                <div data-testid="admin-categories-empty" className="p-12 text-center text-slate-500 font-medium">
                   No categories yet.
                 </div>
               ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 p-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-5">
                   {items.map((category) => (
                     <div
                       key={category.id}
                       data-testid={`admin-category-card-${category.id}`}
-                      className="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+                      className="flex flex-col rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
                     >
-                      <div className="relative aspect-square rounded-lg overflow-hidden bg-slate-100 mb-3">
-                        {category.image_url ? (
+                      <div className="relative aspect-square rounded-xl overflow-hidden bg-slate-100 mb-3 shadow-inner">
+                        {category.image_url || CATEGORY_FALLBACK_IMAGES[category.slug] ? (
                           <img
-                            src={category.image_url}
+                            src={category.image_url || CATEGORY_FALLBACK_IMAGES[category.slug]}
                             alt={category.name}
+                            onError={(e) => {
+                              const fallback = CATEGORY_FALLBACK_IMAGES[category.slug] || "/api/images/catalog/whey_isolate.jpg";
+                              if (e.currentTarget.src !== fallback && !e.currentTarget.src.endsWith(fallback)) {
+                                e.currentTarget.src = fallback;
+                              }
+                            }}
                             className="w-full h-full object-cover"
                           />
                         ) : (
@@ -216,18 +224,18 @@ export default function Categories() {
                           </div>
                         )}
                       </div>
-                      <h3 className="font-display font-bold text-slate-900" data-testid={`admin-category-name-${category.id}`}>
+                      <h3 className="font-display font-bold text-slate-900 tracking-tight" data-testid={`admin-category-name-${category.id}`}>
                         {category.name}
                       </h3>
                       {category.tagline && (
-                        <p className="text-sm text-slate-500 mt-0.5" data-testid={`admin-category-tagline-${category.id}`}>
+                        <p className="text-xs text-slate-500 mt-0.5 line-clamp-1" data-testid={`admin-category-tagline-${category.id}`}>
                           {category.tagline}
                         </p>
                       )}
-                      <span className="mt-auto text-xs font-bold text-slate-400 uppercase" data-testid={`admin-category-count-${category.id}`}>
+                      <span className="mt-auto pt-2 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider" data-testid={`admin-category-count-${category.id}`}>
                         {category.product_count ?? 0} products
                       </span>
-                      <div className="mt-3 flex gap-2">
+                      <div className="mt-3 flex gap-2 pt-2 border-t border-slate-100/80">
                         <button
                           data-testid={`admin-category-edit-${category.id}`}
                           onClick={() => {
@@ -241,19 +249,19 @@ export default function Categories() {
                             });
                             setOpen(true);
                           }}
-                          className="w-8 h-8 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-colors"
+                          className="w-8 h-8 rounded-xl border border-slate-200/80 bg-white text-slate-600 hover:text-slate-900 hover:bg-slate-50 shadow-sm flex items-center justify-center transition-colors"
                           title="Edit"
                         >
-                          <Edit2 className="w-4 h-4" />
+                          <Edit2 className="w-3.5 h-3.5" />
                         </button>
                         <button
                           data-testid={`admin-category-delete-${category.id}`}
                           onClick={() => handleDelete(category.id)}
                           disabled={deleting === category.id}
-                          className="w-8 h-8 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-red-50 hover:text-kinetic-red disabled:opacity-50 transition-colors"
+                          className="w-8 h-8 rounded-xl border border-slate-200/80 bg-white text-slate-600 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 shadow-sm flex items-center justify-center disabled:opacity-50 transition-colors"
                           title="Delete"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </div>
@@ -267,31 +275,33 @@ export default function Categories() {
 
       <AnimatePresence>
         {open && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={closeForm}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto" data-lenis-prevent>
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/40 backdrop-blur-sm"
+              onClick={closeForm}
+              className="fixed inset-0 bg-slate-900/40 backdrop-blur-md"
             />
             <motion.div
-              initial={{ opacity: 0, y: 24 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 24 }}
-              onClick={(event) => event.stopPropagation()}
-              className="relative z-10 w-full max-w-md max-h-[90vh] overflow-y-auto bg-white rounded-2xl border border-slate-200 shadow-2xl p-6"
+              initial={{ opacity: 0, scale: 0.96, y: 16 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 16 }}
+              transition={{ duration: 0.22, ease: "easeOut" }}
+              className="relative z-10 w-full max-w-md max-h-[90vh] overflow-y-auto kinetic-scroll bg-[#F6F7F9] rounded-3xl border border-slate-200 shadow-2xl p-6 sm:p-7"
+              data-lenis-prevent
             >
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="font-display font-bold text-xl text-slate-900">
+              <div className="flex items-center justify-between mb-6 pb-3 border-b border-slate-100">
+                <h2 className="font-display font-black text-xl text-slate-900 tracking-tight">
                   {editing ? "Edit category" : "Add category"}
                 </h2>
                 <button
                   type="button"
                   data-testid="admin-category-form-close"
                   onClick={closeForm}
-                  className="text-slate-400 hover:text-slate-900 text-lg p-1"
+                  className="w-8 h-8 rounded-full bg-slate-100/80 hover:bg-slate-200 text-slate-500 hover:text-slate-800 flex items-center justify-center transition-colors"
                 >
-                  ✕
+                  <X className="w-4 h-4" />
                 </button>
               </div>
               <form onSubmit={handleSave} className="space-y-4">

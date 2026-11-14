@@ -395,37 +395,44 @@ export default function ProductForm({ product: initialProduct, onSave, onClose }
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-hidden" data-lenis-prevent>
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-black/40 backdrop-blur-sm"
+        onClick={onClose}
+        className="fixed inset-0 bg-slate-900/40 backdrop-blur-md"
       />
       <motion.div
-        initial={{ opacity: 0, y: 24 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: 24 }}
-        onClick={(event) => event.stopPropagation()}
-        className="relative z-10 w-full max-w-5xl max-h-[90vh] overflow-y-auto kinetic-scroll bg-white rounded-2xl border border-slate-200 shadow-2xl p-6"
+        initial={{ opacity: 0, scale: 0.96, y: 14 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.96, y: 14 }}
+        transition={{ duration: 0.2, ease: "easeOut" }}
+        className="relative z-10 w-full max-w-3xl max-h-[88vh] flex flex-col bg-[#F6F7F9] rounded-3xl border border-slate-200 shadow-2xl overflow-hidden"
         data-lenis-prevent
       >
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="font-display font-bold text-xl text-slate-900">
-            {mode === "edit" ? "Edit product" : "Add product"}
-          </h2>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-white flex-shrink-0">
+          <div>
+            <h2 className="font-display font-black text-xl sm:text-2xl text-slate-900 tracking-tight">
+              {mode === "edit" ? "Edit product" : "Add new product"}
+            </h2>
+            <p className="text-xs text-slate-500 font-medium mt-0.5">
+              Fill in product details, variants, inventory and media.
+            </p>
+          </div>
           <button
             type="button"
             data-testid="admin-product-form-close"
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-900 p-1"
+            className="w-8 h-8 rounded-full bg-slate-100/80 hover:bg-slate-200 text-slate-500 hover:text-slate-800 flex items-center justify-center transition-colors"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+          <div className="p-6 overflow-y-auto kinetic-scroll flex-1 space-y-6" data-lenis-prevent>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Images: dropzone + preview grid */}
             <div className="lg:col-span-2 space-y-3">
               <div className="flex items-center gap-2">
@@ -533,7 +540,7 @@ export default function ProductForm({ product: initialProduct, onSave, onClose }
                     value={form.brand}
                     onChange={(event) => setField("brand", event.target.value)}
                     className="w-full rounded-xl border px-3 py-2 text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors border-slate-200"
-                    placeholder="e.g. KINETIC"
+                    placeholder="e.g. TOM NUTRITION"
                   />
                 </div>
                 <div className="col-span-2">
@@ -840,7 +847,9 @@ export default function ProductForm({ product: initialProduct, onSave, onClose }
             </div>
           </div>
 
-          <div className="flex justify-end gap-3 pt-6 border-t border-slate-200">
+          </div>
+
+          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 bg-white flex-shrink-0">
             <button
               data-testid="admin-product-cancel"
               type="button"
@@ -853,7 +862,7 @@ export default function ProductForm({ product: initialProduct, onSave, onClose }
               data-testid="admin-product-save"
               type="submit"
               disabled={saving}
-              className="px-4 py-2 rounded-xl text-sm font-bold text-white bg-kinetic-red hover:bg-red-600 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+              className="px-5 py-2 rounded-xl text-sm font-bold text-white bg-kinetic-red hover:bg-red-600 shadow-md shadow-kinetic-red/20 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed transition-all"
             >
               {saving ? "Saving…" : mode === "edit" ? "Update product" : "Create product"}
             </button>

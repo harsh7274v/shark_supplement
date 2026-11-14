@@ -4,6 +4,7 @@ import { Search, RefreshCw } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { API, inr, formatApiError } from "../../lib/api";
 import { toast } from "sonner";
+import DurationFilter, { isWithinDateRange } from "./DurationFilter";
 
 const PAYMENT_COLORS = {
   paid: "bg-kinetic-volt/10 text-kinetic-volt border-kinetic-volt/20",
@@ -20,12 +21,20 @@ export default function Payments() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
+  const [duration, setDuration] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const fetchPayments = useCallback(async () => {
     setLoading(true);
     setRefreshing(true);
     try {
-      const { data } = await API.get("/admin/payments");
+      const { data } = await API.get("/admin/payments", {
+        params: {
+          from: dateFrom || undefined,
+          to: dateTo || undefined,
+        },
+      });
       setItems(Array.isArray(data) ? data : []);
     } catch (error) {
       toast.error(formatApiError(error) || "Failed to load payments");
@@ -33,19 +42,25 @@ export default function Payments() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [dateFrom, dateTo]);
 
   useEffect(() => {
     fetchPayments();
   }, [fetchPayments]);
 
   const filtered = items.filter((payment) => {
+    // 1. Duration filter
+    if (!isWithinDateRange(payment.created_at, dateFrom, dateTo)) {
+      return false;
+    }
+    // 2. Search query filter
     const query = search.toLowerCase();
     if (!query) return true;
     const haystack = [
       payment.order_number,
       payment.method,
       payment.id,
+      payment.status,
     ]
       .map((value) => (value == null ? "" : String(value)))
       .join(" ")
@@ -60,7 +75,7 @@ export default function Payments() {
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        className="flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+        className="flex flex-col lg:flex-row lg:items-center justify-between gap-4"
       >
         <div>
           <h1 className="font-display font-black text-2xl sm:text-3xl tracking-tight text-slate-900">
@@ -70,40 +85,54 @@ export default function Payments() {
             Every payment of the store, newest first · amounts in rupees
           </p>
         </div>
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-          <div className="relative w-full sm:w-72">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="relative w-full sm:w-64">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
               data-testid="admin-payments-search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search order, method or payment id"
-              className="w-full pl-10 py-2 rounded-xl border border-slate-200 bg-white text-slate-900 focus:ring-2 focus:ring-kinetic-red outline-none transition-colors"
+              className="w-full pl-10 pr-4 py-2 rounded-2xl border border-slate-200 bg-[#F6F7F9] text-slate-900 focus:bg-white focus:ring-4 focus:ring-slate-900/5 focus:border-slate-400 outline-none transition-all text-xs"
             />
           </div>
+
+          {/* Duration Dropdown: 7 days, month, 3 months, year, custom */}
+          <DurationFilter
+            value={duration}
+            from={dateFrom}
+            to={dateTo}
+            onChange={({ duration: d, from: f, to: t }) => {
+              setDuration(d);
+              setDateFrom(f);
+              setDateTo(t);
+            }}
+          />
+
           <button
             data-testid="admin-refresh-payments"
             onClick={fetchPayments}
             disabled={refreshing}
-            className="w-9 h-9 rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+            className="w-9 h-9 rounded-2xl border border-slate-200 bg-[#F6F7F9] text-slate-600 hover:text-slate-900 hover:bg-slate-100 shadow-xs flex items-center justify-center disabled:opacity-50 transition-colors"
             title="Refresh"
           >
-            <RefreshCw className="w-4 h-4" />
+            <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
           </button>
         </div>
       </motion.div>
 
-      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      {/* Payments Table - Dusky White Box */}
+      <div className="rounded-3xl border border-slate-200/80 bg-[#F6F7F9] shadow-sm overflow-hidden">
         <AnimatePresence>
           {loading ? (
-            <div key="loading" data-testid="admin-payments-loading" className="flex h-80 items-center justify-center text-slate-400 px-6">
+            <div key="loading" data-testid="admin-payments-loading" className="flex h-80 items-center justify-center text-slate-400 px-6 font-medium">
               Loading payments…
             </div>
           ) : (
-            <div key="table">
+            <div key="table" className="overflow-x-auto">
               <table className="w-full text-sm text-left">
                 <thead>
-                  <tr className="border-b border-slate-100 bg-slate-50">
+                  <tr className="border-b border-slate-200 bg-slate-100/70">
                     <th className="p-4 text-xs font-bold uppercase tracking-wider text-slate-400 w-24">Payment</th>
                     <th className="p-4 text-xs font-bold uppercase tracking-wider text-slate-400">Order</th>
                     <th className="p-4 text-xs font-bold uppercase tracking-wider text-slate-400 w-24">Method</th>
@@ -117,7 +146,7 @@ export default function Payments() {
                     <tr
                       key={payment.id}
                       data-testid={`admin-payment-row-${payment.id}`}
-                      className="hover:bg-slate-50 transition-colors"
+                      className="hover:bg-slate-100/60 transition-colors"
                     >
                       <td className="p-4">
                         <span data-testid={`admin-payment-id-${payment.id}`} className="font-semibold text-slate-600">
@@ -163,8 +192,8 @@ export default function Payments() {
                   ))}
                   {filtered.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="p-16 text-center text-slate-500" data-testid="admin-payments-empty">
-                        No payments found.
+                      <td colSpan={6} className="p-16 text-center text-slate-500 font-medium" data-testid="admin-payments-empty">
+                        No payments found for the selected duration or filter.
                       </td>
                     </tr>
                   )}

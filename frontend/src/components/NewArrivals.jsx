@@ -7,9 +7,18 @@ import ProductCard from "./ProductCard";
 
 const EASE = [0.16, 1, 0.3, 1];
 
-export default function NewArrivals() {
+function dedupeById(list) {
+  const seen = new Set();
+  return list.filter((item) => {
+    if (!item?.id || seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+
+export default function NewArrivals({ onProductsLoaded }) {
   const [products, setProducts] = useState(() =>
-    DEFAULT_PRODUCTS.filter((p) => p.badge === "NEW").slice(0, 4)
+    dedupeById(DEFAULT_PRODUCTS.filter((p) => p.badge === "NEW").slice(0, 4))
   );
 
   useEffect(() => {
@@ -20,12 +29,18 @@ export default function NewArrivals() {
     API.get("/products", { params: { new_arrivals: "1", sort: "newest", limit: 4 } })
       .then((r) => {
         if (alive && Array.isArray(r.data)) {
-          setProducts(r.data);
+          const clean = dedupeById(r.data);
+          setProducts(clean);
+          onProductsLoaded?.(clean);
         }
       })
       .catch(() => {});
     return () => { alive = false; };
-  }, []);
+  }, [onProductsLoaded]);
+
+  if (products.length === 0) {
+    return null;
+  }
 
   return (
     <section id="new-arrivals" className="py-20 lg:py-24" data-testid="new-arrivals-section">

@@ -19,6 +19,8 @@ export interface PricedItem {
   qty: number;
   flavor?: string | null;
   weight?: string | null;
+  /** Whether this product is currently on promotional sale (ineligible for coupon discounts). */
+  is_on_sale?: boolean;
 }
 
 /** A row of the `coupons` table. */
@@ -30,6 +32,8 @@ export interface CouponRow {
   /** The smallest order the coupon works on, in paise. */
   min_order: number;
   active: number;
+  /** Whether the coupon is single-use per customer (1: yes, 0: no). Default 1. */
+  single_use_per_user?: number;
 }
 
 /** The prices of an order, in paise. */
@@ -81,14 +85,91 @@ export function couponDiscount(coupon: CouponRow | null, subtotal: number): numb
 }
 
 /**
+ * The address fields required to verify regional free shipping.
+ */
+export interface ShippingDestination {
+  city?: string;
+  state?: string;
+  pincode?: string;
+  address?: string;
+  landmark?: string;
+  lat?: number;
+  lng?: number;
+}
+
+/**
+ * Checks if a shipping address is in Jamshedpur or surrounding areas
+ * (including Adityapur, Gamharia, Sakchi, Bistupur, Kadma, Sonari, Mango, Telco, Jugsalai, etc.).
+ */
+export function isJamshedpurOrSurrounding(dest?: ShippingDestination | null): boolean {
+  if (!dest) return false;
+
+  // 1. Coordinate check (within ~40km of Jamshedpur center ~22.805, 86.203)
+  if (typeof dest.lat === "number" && typeof dest.lng === "number") {
+    const dLat = dest.lat - 22.8046;
+    const dLng = dest.lng - 86.2029;
+    if (dLat * dLat + dLng * dLng <= 0.16) {
+      return true;
+    }
+  }
+
+  // 2. Pincode check: Jamshedpur urban (831xxx) and Adityapur/Gamharia corridor (8321xx / 8323xx)
+  const pin = (dest.pincode || "").replace(/\D/g, "");
+  if (pin.startsWith("831") || pin.startsWith("8321") || pin.startsWith("8323")) {
+    return true;
+  }
+
+  // 3. Keyword check across text fields
+  const text = `${dest.city || ""} ${dest.landmark || ""} ${dest.address || ""} ${dest.state || ""}`.toLowerCase();
+  const keywords = [
+    "jamshedpur",
+    "tatanagar",
+    "adityapur",
+    "gamharia",
+    "gamaria",
+    "sakchi",
+    "bistupur",
+    "bishtupur",
+    "kadma",
+    "sonari",
+    "mango",
+    "telco",
+    "jugsalai",
+    "golmuri",
+    "burmamines",
+    "baridih",
+    "bagbera",
+    "parsudih",
+    "sidhgora",
+    "govindpur",
+    "sundernagar",
+    "agrico",
+    "kandra",
+    "singhbhum",
+  ];
+  return keywords.some((k) => text.includes(k));
+}
+
+/**
  * The prices of an order: the subtotal of its lines, the discount of the
  * coupon, the GST, the shipping and the total.
  */
-export function priceOrder(items: PricedItem[], coupon: CouponRow | null): PriceBreakdown {
+export function priceOrder(
+  items: PricedItem[],
+  coupon: CouponRow | null,
+  destination?: ShippingDestination | null
+): PriceBreakdown {
   const subtotal = items.reduce((sum, item) => sum + item.unit_price * item.qty, 0);
-  const discount = couponDiscount(coupon, subtotal);
+  // Sale products are not eligible for coupon discounts
+  const hasSaleFlags = items.some((item) => item.is_on_sale !== undefined);
+  const eligibleSubtotal = hasSaleFlags
+    ? items.filter((item) => !item.is_on_sale).reduce((sum, item) => sum + item.unit_price * item.qty, 0)
+    : subtotal;
+
+  const discount = couponDiscount(coupon, eligibleSubtotal);
   const gst = Math.round((subtotal - discount) * GST_RATE);
-  const shipping = subtotal - discount >= FREE_SHIPPING_FROM ? 0 : SHIPPING_FEE;
+  const isFreeArea = isJamshedpurOrSurrounding(destination);
+  const shipping = isFreeArea || subtotal - discount >= FREE_SHIPPING_FROM ? 0 : SHIPPING_FEE;
   const total = subtotal - discount + gst + shipping;
 
   return { subtotal, discount, gst, shipping, total };

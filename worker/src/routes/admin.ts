@@ -1212,6 +1212,9 @@ interface OrderRow {
   estimated_delivery_date: string | null;
   created_at: string;
   updated_at: string;
+  courier_name?: string | null;
+  tracking_number?: string | null;
+  tracking_url?: string | null;
 }
 
 /** A line of an order, as the database has it. */
@@ -1275,6 +1278,9 @@ interface AdminOrderRow {
   estimated_delivery_date: string | null;
   created_at: string;
   updated_at: string;
+  courier_name: string | null;
+  tracking_number: string | null;
+  tracking_url: string | null;
   item_count: number;
   payment_method: string | null;
   payment_status: string | null;
@@ -1304,6 +1310,9 @@ interface OrderDetail {
   estimated_delivery_date: string | null;
   created_at: string;
   updated_at: string;
+  courier_name: string | null;
+  tracking_number: string | null;
+  tracking_url: string | null;
   items: {
     id: string;
     product_id: string | null;
@@ -1399,7 +1408,8 @@ async function readOrderRow(
     .prepare(
       `SELECT id, order_number, user_id, name, email, phone, address, subtotal,
               discount, coupon_code, gst, shipping, total, status,
-              estimated_delivery_date, created_at, updated_at
+              estimated_delivery_date, created_at, updated_at,
+              courier_name, tracking_number, tracking_url
        FROM orders WHERE id = ?`,
     )
     .bind(id)
@@ -1466,6 +1476,9 @@ async function readOrderDetail(
     estimated_delivery_date: order.estimated_delivery_date,
     created_at: order.created_at,
     updated_at: order.updated_at,
+    courier_name: order.courier_name ?? null,
+    tracking_number: order.tracking_number ?? null,
+    tracking_url: order.tracking_url ?? null,
     items: items.results.map((item) => ({
       id: item.id,
       product_id: item.product_id,
@@ -1519,6 +1532,7 @@ adminRoutes.get("/orders", async (c: AdminContext) => {
     SELECT o.id, o.order_number, o.user_id, o.name, o.email, o.phone, o.address,
            o.subtotal, o.discount, o.coupon_code, o.gst, o.shipping, o.total,
            o.status, o.estimated_delivery_date, o.created_at, o.updated_at,
+           o.courier_name, o.tracking_number, o.tracking_url,
            (SELECT COUNT(*) FROM order_items WHERE order_id = o.id) AS item_count,
            (SELECT method FROM payments WHERE order_id = o.id
             ORDER BY created_at DESC, id DESC LIMIT 1) AS payment_method,
@@ -1532,6 +1546,19 @@ adminRoutes.get("/orders", async (c: AdminContext) => {
      ORDER BY date(o.created_at) DESC,
               CASE WHEN o.status = 'placed' THEN 0 ELSE 1 END,
               o.created_at DESC, o.id DESC`;
+
+  const rawLimit = c.req.query("limit");
+  const rawOffset = c.req.query("offset");
+  if (rawLimit !== undefined) {
+    const limitNum = Math.min(200, Math.max(1, Number.parseInt(rawLimit, 10) || 50));
+    sql += ` LIMIT ?`;
+    bindings.push(limitNum);
+    if (rawOffset !== undefined) {
+      const offsetNum = Math.max(0, Number.parseInt(rawOffset, 10) || 0);
+      sql += ` OFFSET ?`;
+      bindings.push(offsetNum);
+    }
+  }
 
   const { results } = await c.env.DB
     .prepare(sql)
@@ -1581,12 +1608,9 @@ adminRoutes.patch("/orders/:id", async (c: AdminContext) => {
     return c.json({ detail: INVALID_BODY }, 400);
   }
 
-  // The contact and address block can only be replaced while the order is placed.
+  // Admin can update shipping and address details for logistics management.
   let shippingBlock: ShippingBlock | null = null;
   if (body.shipping !== undefined) {
-    if (current.status !== "placed") {
-      return c.json({ detail: ORDER_NOT_EDITABLE }, 400);
-    }
     shippingBlock = readShippingBlock(body.shipping);
     if (!shippingBlock) {
       return c.json({ detail: SHIPPING_REQUIRED }, 400);
@@ -1603,29 +1627,58 @@ adminRoutes.patch("/orders/:id", async (c: AdminContext) => {
       return c.json({ detail: INVALID_STATUS }, 400);
     }
     if (status !== current.status) {
-      if (status === "cancelled") {
-        // Only placed and confirmed orders can be cancelled: once an order
-        // is on its way or delivered, cancelling it is no longer possible.
-        if (current.status !== "placed" && current.status !== "confirmed") {
-          return c.json({ detail: CANNOT_CANCEL_AFTER_SHIPPING }, 400);
-        }
-      } else if (ORDER_NEXT[current.status] !== status) {
-        return c.json(
-          { detail: `Cannot change status from ${current.status} to ${status}` },
-          400,
-        );
-      }
       nextStatus = status;
       nextEta =
         status === "shipped"
           ? readAdminString(body.estimated_delivery_date) || deliveryEstimate()
-          : current.estimated_delivery_date;
+          : (body.estimated_delivery_date ? readAdminString(body.estimated_delivery_date) : current.estimated_delivery_date);
       statusChanged = true;
     }
   }
 
   const now = new Date().toISOString();
   const statements: D1PreparedStatement[] = [];
+
+  // Courier tracking updates
+  const courierName = body.courier_name !== undefined ? readAdminString(body.courier_name) : undefined;
+  const trackingNumber = body.tracking_number !== undefined ? readAdminString(body.tracking_number) : undefined;
+  const trackingUrl = body.tracking_url !== undefined ? readAdminString(body.tracking_url) : undefined;
+
+  if (trackingUrl) {
+    let valid = false;
+    try {
+      const parsed = new URL(trackingUrl);
+      valid = parsed.protocol === "http:" || parsed.protocol === "https:";
+    } catch {
+      valid = false;
+    }
+    if (!valid) {
+      return c.json({ detail: "Tracking URL must be a valid http or https URL" }, 400);
+    }
+  }
+
+  const trackingUpdates: string[] = [];
+  const trackingParams: unknown[] = [];
+  if (courierName !== undefined) {
+    trackingUpdates.push("courier_name = ?");
+    trackingParams.push(courierName || null);
+  }
+  if (trackingNumber !== undefined) {
+    trackingUpdates.push("tracking_number = ?");
+    trackingParams.push(trackingNumber || null);
+  }
+  if (trackingUrl !== undefined) {
+    trackingUpdates.push("tracking_url = ?");
+    trackingParams.push(trackingUrl || null);
+  }
+
+  if (trackingUpdates.length > 0) {
+    statements.push(
+      c.env.DB
+        .prepare(`UPDATE orders SET ${trackingUpdates.join(", ")}, updated_at = ? WHERE id = ?`)
+        .bind(...trackingParams, now, id),
+    );
+  }
 
   if (shippingBlock) {
     statements.push(
@@ -1659,7 +1712,12 @@ adminRoutes.patch("/orders/:id", async (c: AdminContext) => {
         .prepare(
           "INSERT INTO order_status_history (id, order_id, status, note) VALUES (?, ?, ?, ?)",
         )
-        .bind(newId("hist"), id, nextStatus, statusNote(nextStatus)),
+        .bind(
+          newId("hist"),
+          id,
+          nextStatus,
+          (body.note ? readAdminString(body.note) : null) || statusNote(nextStatus),
+        ),
     );
   }
 
@@ -1688,6 +1746,9 @@ adminRoutes.patch("/orders/:id", async (c: AdminContext) => {
         )
         .bind(id),
     );
+    statements.push(
+      c.env.DB.prepare("DELETE FROM coupon_redemptions WHERE order_id = ?").bind(id),
+    );
   }
 
   if (statements.length > 0) {
@@ -1708,6 +1769,9 @@ adminRoutes.patch("/orders/:id", async (c: AdminContext) => {
         shipping: current.shipping,
         total: current.total,
         estimated_delivery_date: nextEta,
+        courier_name: courierName !== undefined ? (courierName || null) : (current.courier_name ?? null),
+        tracking_number: trackingNumber !== undefined ? (trackingNumber || null) : (current.tracking_number ?? null),
+        tracking_url: trackingUrl !== undefined ? (trackingUrl || null) : (current.tracking_url ?? null),
       };
       await sendMail(
         c.env,
@@ -1771,6 +1835,7 @@ interface CouponRow {
   discount_value: number;
   min_order: number;
   active: number;
+  single_use_per_user?: number;
 }
 
 /** A coupon, as the API serves it. */
@@ -1781,6 +1846,7 @@ interface CouponJson {
   discount_value: number;
   min_order: number;
   active: number;
+  single_use_per_user: number;
 }
 
 /** Turns a coupon row into the JSON the API serves. */
@@ -1792,6 +1858,7 @@ function toCoupon(row: CouponRow): CouponJson {
     discount_value: row.discount_value,
     min_order: row.min_order,
     active: row.active,
+    single_use_per_user: row.single_use_per_user ?? 1,
   };
 }
 
@@ -1802,7 +1869,7 @@ async function readCouponRow(
 ): Promise<CouponRow | null> {
   return db
     .prepare(
-      `SELECT id, code, discount_type, discount_value, min_order, active
+      `SELECT id, code, discount_type, discount_value, min_order, active, single_use_per_user
        FROM coupons WHERE id = ?`,
     )
     .bind(id)
@@ -1913,6 +1980,7 @@ adminRoutes.post("/demo-data/reset", async (c: AdminContext) => {
     c.env.DB.prepare("DELETE FROM payments"),
     c.env.DB.prepare("DELETE FROM order_status_history"),
     c.env.DB.prepare("DELETE FROM email_log"),
+    c.env.DB.prepare("DELETE FROM coupon_redemptions"),
     c.env.DB.prepare("DELETE FROM orders"),
   ]);
 
@@ -1958,6 +2026,7 @@ adminRoutes.post("/demo-data/seed", async (c: AdminContext) => {
     c.env.DB.prepare("DELETE FROM payments"),
     c.env.DB.prepare("DELETE FROM order_status_history"),
     c.env.DB.prepare("DELETE FROM email_log"),
+    c.env.DB.prepare("DELETE FROM coupon_redemptions"),
     c.env.DB.prepare("DELETE FROM orders"),
   ]);
 
@@ -1971,7 +2040,7 @@ adminRoutes.post("/demo-data/seed", async (c: AdminContext) => {
 adminRoutes.get("/coupons", async (c: AdminContext) => {
   const { results } = await c.env.DB
     .prepare(
-      `SELECT id, code, discount_type, discount_value, min_order, active
+      `SELECT id, code, discount_type, discount_value, min_order, active, single_use_per_user
        FROM coupons
        ORDER BY code ASC`,
     )
@@ -2019,6 +2088,15 @@ adminRoutes.post("/coupons", async (c: AdminContext) => {
     return c.json({ detail: BAD_ACTIVE }, 400);
   }
 
+  let singleUsePerUser = 1;
+  if (body.single_use_per_user !== undefined) {
+    const given = readFlag(body.single_use_per_user);
+    if (given === null) {
+      return c.json({ detail: "single_use_per_user must be 0 or 1" }, 400);
+    }
+    singleUsePerUser = given;
+  }
+
   const taken = await c.env.DB
     .prepare("SELECT id FROM coupons WHERE code = ?")
     .bind(upper)
@@ -2030,10 +2108,10 @@ adminRoutes.post("/coupons", async (c: AdminContext) => {
   const id = `coup_${randomHex(8)}`;
   await c.env.DB
     .prepare(
-      `INSERT INTO coupons (id, code, discount_type, discount_value, min_order, active)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO coupons (id, code, discount_type, discount_value, min_order, active, single_use_per_user)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(id, upper, discountType, discountValue, minOrder, active)
+    .bind(id, upper, discountType, discountValue, minOrder, active, singleUsePerUser)
     .run();
 
   const coupon = await readCoupon(c.env.DB, id);
@@ -2112,6 +2190,15 @@ adminRoutes.patch("/coupons/:id", async (c: AdminContext) => {
     active = given;
   }
 
+  let singleUsePerUser = current.single_use_per_user ?? 1;
+  if (body.single_use_per_user !== undefined) {
+    const given = readFlag(body.single_use_per_user);
+    if (given === null) {
+      return c.json({ detail: "single_use_per_user must be 0 or 1" }, 400);
+    }
+    singleUsePerUser = given;
+  }
+
   if (code !== current.code) {
     const taken = await c.env.DB
       .prepare("SELECT id FROM coupons WHERE code = ? AND id != ?")
@@ -2125,9 +2212,9 @@ adminRoutes.patch("/coupons/:id", async (c: AdminContext) => {
   await c.env.DB
     .prepare(
       `UPDATE coupons SET code = ?, discount_type = ?, discount_value = ?,
-                       min_order = ?, active = ? WHERE id = ?`,
+                       min_order = ?, active = ?, single_use_per_user = ? WHERE id = ?`,
     )
-    .bind(code, discountType, discountValue, minOrder, active, id)
+    .bind(code, discountType, discountValue, minOrder, active, singleUsePerUser, id)
     .run();
 
   const coupon = await readCoupon(c.env.DB, id);
@@ -2154,4 +2241,75 @@ adminRoutes.delete("/coupons/:id", async (c: AdminContext) => {
   }
 
   return c.json({ ok: true });
+});
+
+/**
+ * Database maintenance and data retention cleanup:
+ * 1. Customer order retention policy (3 months / 90 days):
+ *    Unlinks user accounts from orders older than 90 days (`user_id = NULL`).
+ *    The complete order, items, total, discount, tax, payment, and customer details
+ *    stay intact for Admin accounting and tax compliance, but the customer profile no longer
+ *    accumulates storage or retains historical links beyond 90 days.
+ * 2. Purges email logs older than 90 days to free storage.
+ * 3. Purges expired sessions, expired login attempts, and used/expired password resets.
+ */
+adminRoutes.post("/maintenance/cleanup", async (c: AdminContext) => {
+  // 1. Unlink user_id on orders older than 90 days
+  const ordersResult = await c.env.DB.prepare(
+    `UPDATE orders SET user_id = NULL WHERE user_id IS NOT NULL AND datetime(created_at) < datetime('now', '-90 days')`,
+  ).run();
+
+  // 2. Prune email_log older than 90 days
+  const emailLogResult = await c.env.DB.prepare(
+    `DELETE FROM email_log WHERE datetime(created_at) < datetime('now', '-90 days')`,
+  ).run();
+
+  // 3. Prune expired sessions
+  const sessionsResult = await c.env.DB.prepare(
+    `DELETE FROM sessions WHERE datetime(expires_at) < datetime('now')`,
+  ).run();
+
+  // 4. Prune expired login attempts
+  const loginAttemptsResult = await c.env.DB.prepare(
+    `DELETE FROM login_attempts WHERE locked_until IS NOT NULL AND datetime(locked_until) < datetime('now')`,
+  ).run();
+
+  // 5. Prune used or expired password resets
+  const passwordResetsResult = await c.env.DB.prepare(
+    `DELETE FROM password_resets WHERE used = 1 OR datetime(expires_at) < datetime('now')`,
+  ).run();
+
+  return c.json({
+    success: true,
+    orders_anonymized: ordersResult.meta?.changes ?? 0,
+    email_logs_purged: emailLogResult.meta?.changes ?? 0,
+    sessions_purged: sessionsResult.meta?.changes ?? 0,
+    login_attempts_purged: loginAttemptsResult.meta?.changes ?? 0,
+    password_resets_purged: passwordResetsResult.meta?.changes ?? 0,
+    cleaned_at: new Date().toISOString(),
+  });
+});
+
+/** Retention and maintenance statistics for admin dashboard. */
+adminRoutes.get("/maintenance/stats", async (c: AdminContext) => {
+  const [totalOrders, oldUserOrders, oldEmailLogs, expiredSessions] = await Promise.all([
+    c.env.DB.prepare("SELECT COUNT(*) AS total FROM orders").first<{ total: number }>(),
+    c.env.DB.prepare(
+      "SELECT COUNT(*) AS total FROM orders WHERE user_id IS NOT NULL AND datetime(created_at) < datetime('now', '-90 days')",
+    ).first<{ total: number }>(),
+    c.env.DB.prepare(
+      "SELECT COUNT(*) AS total FROM email_log WHERE datetime(created_at) < datetime('now', '-90 days')",
+    ).first<{ total: number }>(),
+    c.env.DB.prepare(
+      "SELECT COUNT(*) AS total FROM sessions WHERE datetime(expires_at) < datetime('now')",
+    ).first<{ total: number }>(),
+  ]);
+
+  return c.json({
+    retention_policy_days: 90,
+    total_orders_in_database: totalOrders?.total ?? 0,
+    user_orders_pending_anonymization: oldUserOrders?.total ?? 0,
+    email_logs_older_than_90_days: oldEmailLogs?.total ?? 0,
+    expired_sessions: expiredSessions?.total ?? 0,
+  });
 });

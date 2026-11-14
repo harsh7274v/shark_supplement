@@ -20,6 +20,6 @@ ALTER TABLE products ADD COLUMN sale_starts_at TEXT;  -- UTC, like every other t
 ALTER TABLE products ADD COLUMN sale_ends_at TEXT;
 
 INSERT OR IGNORE INTO categories (id, slug, name, icon, image_url, tagline, sort_order) VALUES
-  ('cat_apparel',  'apparel',  'Apparel',  NULL, NULL, 'Train hard, look harder.', 90),
-  ('cat_aminos',   'aminos',   'Aminos',   NULL, NULL, 'Recovery starts here.',    91),
-  ('cat_gym_gear', 'gym-gear', 'Gym Gear', NULL, NULL, 'Gear that keeps up.',      92);
+  ('cat_apparel',  'apparel',  'Apparel',  NULL, '/images/apparel.jpg',  'Train hard, look harder.', 90),
+  ('cat_aminos',   'aminos',   'Aminos',   NULL, '/images/aminos.jpg',   'Recovery starts here.',    91),
+  ('cat_gym_gear', 'gym-gear', 'Gym Gear', NULL, '/images/gym_gear.jpg', 'Gear that keeps up.',      92);

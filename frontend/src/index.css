@@ -50,11 +50,12 @@ html.lenis body {
 .lenis.lenis-smooth {
   scroll-behavior: auto !important;
 }
-.lenis.lenis-smooth [data-lenis-prevent] {
+.lenis.lenis-smooth [data-lenis-prevent],
+[data-lenis-prevent] {
   overscroll-behavior: contain;
 }
 .lenis.lenis-stopped {
-  overflow: hidden;
+  overflow: initial;
 }
 
 /* Editorial marquee */
@@ -71,6 +72,22 @@ html.lenis body {
   will-change: transform;
 }
 .kinetic-marquee-track:hover {
+  animation-play-state: paused;
+}
+
+@keyframes marquee-reverse {
+  from {
+    transform: translateX(-50%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+.sale-marquee-track {
+  animation: marquee-reverse 36s linear infinite;
+  will-change: transform;
+}
+.sale-marquee-track:hover {
   animation-play-state: paused;
 }
 

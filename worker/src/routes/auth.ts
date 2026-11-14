@@ -121,8 +121,18 @@ async function setRefreshCookie(c: AuthContext, userId: string, role: string): P
   setCookie(c, REFRESH_TOKEN_COOKIE, token, { ...AUTH_COOKIE_OPTIONS, maxAge: REFRESH_TOKEN_TTL });
 }
 
-/** Signs in the caller: a fresh access token and a fresh refresh token. */
+/** Signs in the caller: a fresh access token, a fresh refresh token and a session row. */
 async function signIn(c: AuthContext, userId: string, role: string): Promise<void> {
+  const sessionToken = randomHex(32);
+  const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL * 1000).toISOString();
+  try {
+    await c.env.DB.prepare("INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)")
+      .bind(sessionToken, userId, expiresAt)
+      .run();
+    setCookie(c, SESSION_TOKEN_COOKIE, sessionToken, { ...AUTH_COOKIE_OPTIONS, maxAge: REFRESH_TOKEN_TTL });
+  } catch {
+    // If sessions table is unavailable or busy, continue with stateless JWT
+  }
   await setAccessCookie(c, userId, role);
   await setRefreshCookie(c, userId, role);
 }
@@ -212,8 +222,12 @@ authRoutes.post("/login", async (c) => {
   }
 
   const user = await findUserByEmail(c.env.DB, email);
+  // Equalize timing to defend against email enumeration via PBKDF2 compute duration
+  const DUMMY_HASH =
+    "pbkdf2$100000$AAAAAAAAAAAAAAAAAAAAAA==$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  const hashToVerify = user?.password_hash ?? DUMMY_HASH;
   const passwordMatches =
-    user?.password_hash != null && (await verifyPassword(password, user.password_hash));
+    (await verifyPassword(password, hashToVerify)) && user != null && user.password_hash != null;
 
   if (!user || !passwordMatches) {
     await countFailedLogin(c.env.DB, identifier);
@@ -292,6 +306,22 @@ authRoutes.post("/refresh", async (c) => {
   const payload = await verifyToken(token, "refresh", c.env.JWT_SECRET);
   if (!payload) {
     return c.json({ detail: "Invalid refresh token" }, 401);
+  }
+
+  // If a session cookie is present, check that the session is active in the database
+  const sessionToken = getCookie(c, SESSION_TOKEN_COOKIE);
+  if (sessionToken) {
+    const session = await c.env.DB.prepare(
+      "SELECT token FROM sessions WHERE token = ? AND user_id = ? AND datetime(expires_at) > datetime('now')",
+    )
+      .bind(sessionToken, payload.sub)
+      .first<{ token: string }>();
+    if (!session) {
+      deleteCookie(c, ACCESS_TOKEN_COOKIE, AUTH_COOKIE_OPTIONS);
+      deleteCookie(c, REFRESH_TOKEN_COOKIE, AUTH_COOKIE_OPTIONS);
+      deleteCookie(c, SESSION_TOKEN_COOKIE, AUTH_COOKIE_OPTIONS);
+      return c.json({ detail: "Session revoked or expired" }, 401);
+    }
   }
 
   // The role is read from the user row, so a role change takes effect here.
