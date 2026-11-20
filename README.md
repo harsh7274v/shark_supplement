@@ -169,3 +169,24 @@ The "Continue with Google" button in the auth modal stays **hidden** until the f
 ## 🔑 Test credentials
 
 See `memory/test_credentials.md` for the pre-seeded admin, customer, and coupon credentials. The admin account is created by the idempotent catalog seed (`worker/seed/001_catalog.sql`) and applied on deploy / via `POST /api/admin/demo-data/seed`.
+
+<img width="1470" height="956" alt="Screenshot 2026-11-21 at 12 45 00 AM" src="https://github.com/user-attachments/assets/bbb327be-b9bd-4776-b533-72aee27a130b" />
+<img width="1470" height="956" alt="Screenshot 2026-11-21 at 12 45 11 AM" src="https://github.com/user-attachments/assets/ef2c00a1-0dcb-4e99-8c34-1b341a404dea" />
+<img width="1470" height="956" alt="Screenshot 2026-11-21 at 12 45 19 AM" src="https://github.com/user-attachments/assets/191689d5-430f-4526-bc55-efd618c395e7" />
+<img width="1470" height="956" alt="Screenshot 2026-11-21 at 12 45 33 AM" src="https://github.com/user-attachments/assets/4ec7994e-33f1-480f-ab11-f6625e7fe779" />
+<img width="1470" height="956" alt="Screenshot 2026-11-21 at 12 45 50 AM" src="https://github.com/user-attachments/assets/16deac27-9e29-4274-9ac3-3fea8dee28ff" />
+<img width="1470" height="956" alt="Screenshot 2026-11-21 at 12 46 10 AM" src="https://github.com/user-attachments/assets/5386cec0-d9de-432b-822b-3065182e257b" />
+<img width="1470" height="956" alt="Screenshot 2026-11-21 at 12 46 16 AM" src="https://github.com/user-attachments/assets/33bd87d1-841c-497f-9954-4b10ee381990" />
+<img width="1470" height="956" alt="Screenshot 2026-11-21 at 12 46 37 AM" src="https://github.com/user-attachments/assets/35977bf5-1892-4888-9975-557354b54e94" />
+<img width="1470" height="956" alt="Screenshot 2026-11-21 at 12 47 05 AM" src="https://github.com/user-attachments/assets/6272e854-a7e4-4204-9809-56fac56dd747" />
+<img width="1470" height="956" alt="Screenshot 2026-11-21 at 12 47 11 AM" src="https://github.com/user-attachments/assets/1a6066b7-9ea1-417c-aaa7-4408ff6b4462" />
+<img width="1470" height="956" alt="Screenshot 2026-11-21 at 12 47 17 AM" src="https://github.com/user-attachments/assets/c2ef299b-4931-4b86-826a-d2c43af9a682" />
+<img width="1470" height="956" alt="Screenshot 2026-11-21 at 12 47 22 AM" src="https://github.com/user-attachments/assets/864adea8-ea50-4a1f-b0b9-7632bbd9e98b" />
+<img width="1470" height="956" alt="Screenshot 2026-11-21 at 12 47 28 AM" src="https://github.com/user-attachments/assets/b99c86bf-a36d-4356-9f9b-91139f4cfb00" />
+<img width="1470" height="956" alt="Screenshot 2026-11-21 at 12 47 34 AM" src="https://github.com/user-attachments/assets/96cf4df1-7254-4292-8f34-643ca5b9da23" />
+<img width="1470" height="956" alt="Screenshot 2026-11-21 at 12 47 45 AM" src="https://github.com/user-attachments/assets/6d2f4d6c-57dc-407f-983d-1535dbcd7772" />
+<img width="1470" height="956" alt="Screenshot 2026-11-21 at 12 47 52 AM" src="https://github.com/user-attachments/assets/9b0ccfe2-97e2-443b-b9fa-9eb8a277dd87" />
+<img width="1470" height="956" alt="Screenshot 2026-11-21 at 12 48 09 AM" src="https://github.com/user-attachments/assets/dccb4604-ea55-4573-b02b-13c5b0f52b8c" />
+<img width="1470" height="956" alt="Screenshot 2026-11-21 at 12 48 23 AM" src="https://github.com/user-attachments/assets/5cdce26e-8f84-4633-a7a1-c74df7c8ad1b" />
+![Uploading Screenshot 2026-11-21 at 12.41.29 AM.png…]()
+
